@@ -130,7 +130,7 @@ class MonitorCommand : public Command {
 "\n"
 "Sample filter options:\n"
 "--exclude-perf                Exclude samples for simpleperf process.\n"
-RECORD_FILTER_OPTION_HELP_MSG_FOR_RECORDING
+RECORD_FILTER_OPTION_HELP_MSG
 "\n"
                 // clang-format on
                 ),
@@ -313,7 +313,7 @@ inline const OptionFormatMap& GetMonitorCmdOptionFormats() {
         {"-g", {OptionValueType::NONE, OptionType::ORDERED, AppRunnerType::ALLOWED}},
         {"-t", {OptionValueType::STRING, OptionType::MULTIPLE, AppRunnerType::ALLOWED}},
     };
-    OptionFormatMap record_filter_options = GetRecordFilterOptionFormats(true);
+    const OptionFormatMap& record_filter_options = GetRecordFilterOptionFormats();
     option_formats.insert(record_filter_options.begin(), record_filter_options.end());
   }
   return option_formats;
@@ -427,7 +427,7 @@ bool MonitorCommand::ParseOptions(const std::vector<std::string>& args) {
   }
 
   if (fp_callchain_sampling_) {
-    if (GetTargetArch() == ARCH_ARM) {
+    if (GetBuildArch() == ARCH_ARM) {
       LOG(WARNING) << "`--callgraph fp` option doesn't work well on arm architecture, "
                    << "consider using `-g` option or profiling on aarch64 architecture.";
     }
