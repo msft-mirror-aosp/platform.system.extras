@@ -29,7 +29,8 @@ int __llvm_profile_write_file(void);
 static void llvm_signal_handler(__unused int signum) {
   __llvm_profile_write_file();
 
-  if (chained_signal_handler != SIG_ERR && chained_signal_handler != SIG_IGN &&
+  if (chained_signal_handler != SIG_ERR &&
+      chained_signal_handler != SIG_IGN &&
       chained_signal_handler != SIG_DFL) {
     (chained_signal_handler)(signum);
   }
