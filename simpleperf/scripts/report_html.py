@@ -18,11 +18,10 @@
 from __future__ import annotations
 import argparse
 import collections
-from concurrent.futures import Future, ThreadPoolExecutor
+from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
 import datetime
 import json
-import logging
 import os
 from pathlib import Path
 import sys
@@ -30,7 +29,7 @@ from typing import Any, Callable, Dict, Iterator, List, Optional, Set, Tuple, Un
 
 from simpleperf_report_lib import ReportLib, SymbolStruct
 from simpleperf_utils import (
-    Addr2Nearestline, BaseArgumentParser, BinaryFinder, get_script_dir, log_exit, Objdump,
+    Addr2Nearestline, ArgParseFormatter, BinaryFinder, get_script_dir, log_exit, log_info, Objdump,
     open_report_in_browser, ReadElf, SourceFileSearcher)
 
 MAX_CALLSTACK_LENGTH = 750
@@ -137,8 +136,7 @@ class ProcessScope(object):
         result = {}
         result['pid'] = self.pid
         result['eventCount'] = self.event_count
-        # Sorting threads by sample count is better for profiles recorded with --trace-offcpu.
-        threads = sorted(self.threads.values(), key=lambda a: a.sample_count, reverse=True)
+        threads = sorted(self.threads.values(), key=lambda a: a.event_count, reverse=True)
         result['threads'] = [thread.get_sample_info(gen_addr_hit_map)
                              for thread in threads]
         return result
@@ -605,13 +603,11 @@ class RecordData(object):
     def __init__(
             self, binary_cache_path: Optional[str],
             ndk_path: Optional[str],
-            build_addr_hit_map: bool, proguard_mapping_files: Optional[List[str]],
-            trace_offcpu: Optional[str]):
+            build_addr_hit_map: bool, proguard_mapping_files: Optional[List[str]] = None):
         self.binary_cache_path = binary_cache_path
         self.ndk_path = ndk_path
         self.build_addr_hit_map = build_addr_hit_map
         self.proguard_mapping_files = proguard_mapping_files
-        self.trace_offcpu = trace_offcpu
         self.meta_info: Optional[Dict[str, str]] = None
         self.cmdline: Optional[str] = None
         self.arch: Optional[str] = None
@@ -623,8 +619,7 @@ class RecordData(object):
         self.gen_addr_hit_map_in_record_info = False
         self.binary_finder = BinaryFinder(binary_cache_path, ReadElf(ndk_path))
 
-    def load_record_file(
-            self, record_file: str, show_art_frames: bool, sample_filter: Optional[str]):
+    def load_record_file(self, record_file: str, show_art_frames: bool):
         lib = ReportLib()
         lib.SetRecordFile(record_file)
         # If not showing ip for unknown symbols, the percent of the unknown symbol may be
@@ -636,10 +631,6 @@ class RecordData(object):
             lib.SetSymfs(self.binary_cache_path)
         for file_path in self.proguard_mapping_files or []:
             lib.AddProguardMappingFile(file_path)
-        if self.trace_offcpu:
-            lib.SetTraceOffCpuMode(self.trace_offcpu)
-        if sample_filter:
-            lib.SetSampleFilter(sample_filter)
         self.meta_info = lib.MetaInfo()
         self.cmdline = lib.GetRecordCmd()
         self.arch = lib.GetArch()
@@ -720,7 +711,7 @@ class RecordData(object):
             self.events[event_name] = EventScope(event_name)
         return self.events[event_name]
 
-    def add_source_code(self, source_dirs: List[str], filter_lib: Callable[[str], bool], jobs: int):
+    def add_source_code(self, source_dirs: List[str], filter_lib: Callable[[str], bool]):
         """ Collect source code information:
             1. Find line ranges for each function in FunctionSet.
             2. Find line for each addr in FunctionScope.addr_hit_map.
@@ -746,7 +737,7 @@ class RecordData(object):
                         func_addr = self.functions.id_to_func[function.func_id].start_addr
                         for addr in function.addr_hit_map:
                             addr2line.add_addr(lib_info.name, lib_info.build_id, func_addr, addr)
-        addr2line.convert_addrs_to_lines(jobs)
+        addr2line.convert_addrs_to_lines()
 
         # Set line range for each function.
         for function in self.functions.id_to_func.values():
@@ -795,6 +786,7 @@ class RecordData(object):
             2. Set flag to dump addr_hit_map when generating record info.
         """
         objdump = Objdump(self.ndk_path, self.binary_finder)
+        executor = ThreadPoolExecutor(jobs)
         lib_functions: Dict[int, List[Function]] = collections.defaultdict(list)
 
         for function in self.functions.id_to_func.values():
@@ -802,23 +794,20 @@ class RecordData(object):
                 continue
             lib_functions[function.lib_id].append(function)
 
-        with ThreadPoolExecutor(jobs) as executor:
-            for lib_id, functions in lib_functions.items():
-                lib = self.libs.get_lib(lib_id)
-                if not filter_lib(lib.name):
-                    continue
-                dso_info = objdump.get_dso_info(lib.name, lib.build_id)
-                if not dso_info:
-                    continue
-                logging.info('Disassemble %s' % dso_info[0])
-                futures: List[Future] = []
-                for function in functions:
-                    futures.append(
-                        executor.submit(objdump.disassemble_code, dso_info,
-                                        function.start_addr, function.addr_len))
-                for i in range(len(functions)):
-                    # Call future.result() to report exceptions raised in the executor.
-                    functions[i].disassembly = futures[i].result()
+        for lib_id, functions in lib_functions.items():
+            lib = self.libs.get_lib(lib_id)
+            if not filter_lib(lib.name):
+                continue
+            dso_info = objdump.get_dso_info(lib.name, lib.build_id)
+            if not dso_info:
+                continue
+            log_info('Disassemble %s' % dso_info[0])
+            for function in functions:
+                def task(function, dso_info):
+                    function.disassembly = objdump.disassemble_code(
+                        dso_info, function.start_addr, function.addr_len)
+                executor.submit(task, function, dso_info)
+        executor.shutdown(wait=True)
         self.gen_addr_hit_map_in_record_info = True
 
     def gen_record_info(self) -> Dict[str, Any]:
@@ -838,8 +827,6 @@ class RecordData(object):
             machine_type = '%s (%s) by %s, arch %s' % (model, name, manufacturer, self.arch)
         record_info['machineType'] = machine_type
         record_info['androidVersion'] = self.meta_info.get('android_version', '')
-        record_info['androidBuildFingerprint'] = self.meta_info.get('android_build_fingerprint', '')
-        record_info['kernelVersion'] = self.meta_info.get('kernel_version', '')
         record_info['recordCmdline'] = self.cmdline
         record_info['totalSamples'] = self.total_samples
         record_info['processNames'] = self._gen_process_names()
@@ -964,7 +951,8 @@ class ReportGenerator(object):
 
 
 def get_args() -> argparse.Namespace:
-    parser = BaseArgumentParser(description='report profiling data')
+    parser = argparse.ArgumentParser(
+        description='report profiling data', formatter_class=ArgParseFormatter)
     parser.add_argument('-i', '--record_file', nargs='+', default=['perf.data'], help="""
                         Set profiling data file to report.""")
     parser.add_argument('-o', '--report_path', default='report.html', help='Set output html file')
@@ -995,8 +983,6 @@ def get_args() -> argparse.Namespace:
     parser.add_argument(
         '--proguard-mapping-file', nargs='+',
         help='Add proguard mapping file to de-obfuscate symbols')
-    parser.add_trace_offcpu_option()
-    parser.add_sample_filter_options()
     return parser.parse_args()
 
 
@@ -1022,10 +1008,10 @@ def main():
         log_exit('Invalid --jobs option.')
 
     # 2. Produce record data.
-    record_data = RecordData(binary_cache_path, ndk_path, build_addr_hit_map,
-                             args.proguard_mapping_file, args.trace_offcpu)
+    record_data = RecordData(binary_cache_path, ndk_path,
+                             build_addr_hit_map, args.proguard_mapping_file)
     for record_file in args.record_file:
-        record_data.load_record_file(record_file, args.show_art_frames, args.sample_filter)
+        record_data.load_record_file(record_file, args.show_art_frames)
     if args.aggregate_by_thread_name:
         record_data.aggregate_by_thread_name()
     record_data.limit_percents(args.min_func_percent, args.min_callchain_percent)
@@ -1038,7 +1024,7 @@ def main():
                 return True
         return False
     if args.add_source_code:
-        record_data.add_source_code(args.source_dirs, filter_lib, args.jobs)
+        record_data.add_source_code(args.source_dirs, filter_lib)
     if args.add_disassembly:
         record_data.add_disassembly(filter_lib, args.jobs)
 
@@ -1051,7 +1037,7 @@ def main():
 
     if not args.no_browser:
         open_report_in_browser(args.report_path)
-    logging.info("Report generated at '%s'." % args.report_path)
+    log_info("Report generated at '%s'." % args.report_path)
 
 
 if __name__ == '__main__':
