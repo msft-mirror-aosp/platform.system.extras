@@ -172,6 +172,10 @@ class RecordCommand : public Command {
 "             Documentation/trace/kprobetrace.rst in the kernel. Examples:\n"
 "               'p:myprobe do_sys_open $arg2:string'   - add event kprobes:myprobe\n"
 "               'r:myretprobe do_sys_open $retval:s64' - add event kprobes:myretprobe\n"
+"--add-counter event1,event2,...     Add additional event counts in record samples. For example,\n"
+"                                    we can use `-e cpu-cycles --add-counter instructions` to\n"
+"                                    get samples for cpu-cycles event, while having instructions\n"
+"                                    event count for each sample.\n"
 "\n"
 "Select monitoring options:\n"
 "-f freq      Set event sample frequency. It means recording at most [freq]\n"
@@ -267,7 +271,7 @@ class RecordCommand : public Command {
 "\n"
 "Sample filter options:\n"
 "--exclude-perf                Exclude samples for simpleperf process.\n"
-RECORD_FILTER_OPTION_HELP_MSG
+RECORD_FILTER_OPTION_HELP_MSG_FOR_RECORDING
 "\n"
 "Recording file options:\n"
 "--no-dump-kernel-symbols  Don't dump kernel symbols in perf.data. By default\n"
@@ -284,8 +288,8 @@ RECORD_FILTER_OPTION_HELP_MSG
 "--add-meta-info key=value     Add extra meta info, which will be stored in the recording file.\n"
 "\n"
 "Other options:\n"
-"--exit-with-parent            Stop recording when the process starting\n"
-"                              simpleperf dies.\n"
+"--exit-with-parent            Stop recording when the thread starting simpleperf dies.\n"
+"--use-cmd-exit-code           Exit with the same exit code as the monitored cmdline.\n"
 "--start_profiling_fd fd_no    After starting profiling, write \"STARTED\" to\n"
 "                              <fd_no>, then close <fd_no>.\n"
 "--stdio-controls-profiling    Use stdin/stdout to pause/resume profiling.\n"
@@ -330,7 +334,12 @@ RECORD_FILTER_OPTION_HELP_MSG
     signal(SIGPIPE, SIG_IGN);
   }
 
-  bool Run(const std::vector<std::string>& args);
+  void Run(const std::vector<std::string>& args, int* exit_code) override;
+  bool Run(const std::vector<std::string>& args) override {
+    int exit_code;
+    Run(args, &exit_code);
+    return exit_code == 0;
+  }
 
  private:
   bool ParseOptions(const std::vector<std::string>& args, std::vector<std::string>* non_option_args,
@@ -435,14 +444,17 @@ RECORD_FILTER_OPTION_HELP_MSG
   std::optional<MapRecordThread> map_record_thread_;
 
   std::unordered_map<std::string, std::string> extra_meta_info_;
+  bool use_cmd_exit_code_ = false;
+  std::vector<std::string> add_counters_;
 };
 
-bool RecordCommand::Run(const std::vector<std::string>& args) {
+void RecordCommand::Run(const std::vector<std::string>& args, int* exit_code) {
+  *exit_code = 1;
   time_stat_.prepare_recording_time = GetSystemClock();
   ScopedCurrentArch scoped_arch(GetMachineArch());
 
   if (!CheckPerfEventLimit()) {
-    return false;
+    return;
   }
   AllowMoreOpenedFiles();
 
@@ -456,42 +468,51 @@ bool RecordCommand::Run(const std::vector<std::string>& args) {
     }
   });
   if (!ParseOptions(args, &workload_args, &probe_events)) {
-    return false;
+    return;
   }
   if (!AdjustPerfEventLimit()) {
-    return false;
+    return;
   }
   std::unique_ptr<ScopedTempFiles> scoped_temp_files =
       ScopedTempFiles::Create(android::base::Dirname(record_filename_));
   if (!scoped_temp_files) {
     PLOG(ERROR) << "Can't create output file in directory "
                 << android::base::Dirname(record_filename_);
-    return false;
+    return;
   }
   if (!app_package_name_.empty() && !in_app_context_) {
     // Some users want to profile non debuggable apps on rooted devices. If we use run-as,
     // it will be impossible when using --app. So don't switch to app's context when we are
     // root.
     if (!IsRoot()) {
-      return RunInAppContext(app_package_name_, "record", args, workload_args.size(),
-                             record_filename_, true);
+      // Running simpleperf in app context doesn't allow running child command. So no need to
+      // consider exit code of child command here.
+      *exit_code = RunInAppContext(app_package_name_, "record", args, workload_args.size(),
+                                   record_filename_, true)
+                       ? 0
+                       : 1;
+      return;
     }
   }
   std::unique_ptr<Workload> workload;
   if (!workload_args.empty()) {
     workload = Workload::CreateWorkload(workload_args);
     if (workload == nullptr) {
-      return false;
+      return;
     }
   }
   if (!PrepareRecording(workload.get())) {
-    return false;
+    return;
   }
   time_stat_.start_recording_time = GetSystemClock();
-  if (!DoRecording(workload.get())) {
-    return false;
+  if (!DoRecording(workload.get()) || !PostProcessRecording(args)) {
+    return;
   }
-  return PostProcessRecording(args);
+  if (use_cmd_exit_code_ && workload) {
+    workload->WaitChildProcess(false, exit_code);
+  } else {
+    *exit_code = 0;
+  }
 }
 
 bool RecordCommand::PrepareRecording(Workload* workload) {
@@ -500,8 +521,17 @@ bool RecordCommand::PrepareRecording(Workload* workload) {
 
   // 2. Add default event type.
   if (event_selection_set_.empty()) {
+    std::string event_type = default_measured_event_type;
+    if (GetTargetArch() == ARCH_X86_32 || GetTargetArch() == ARCH_X86_64) {
+      // Emulators may not support hardware events. So switch to cpu-clock when cpu-cycles isn't
+      // available.
+      if (!IsHardwareEventSupported()) {
+        event_type = "cpu-clock";
+        LOG(INFO) << "Hardware events are not available, switch to cpu-clock.";
+      }
+    }
     size_t group_id;
-    if (!event_selection_set_.AddEventType(default_measured_event_type, &group_id)) {
+    if (!event_selection_set_.AddEventType(event_type, &group_id)) {
       return false;
     }
     if (sample_speed_) {
@@ -513,6 +543,15 @@ bool RecordCommand::PrepareRecording(Workload* workload) {
   exclude_kernel_callchain_ = event_selection_set_.ExcludeKernel();
   if (trace_offcpu_ && !TraceOffCpu()) {
     return false;
+  }
+  if (!add_counters_.empty()) {
+    if (child_inherit_) {
+      LOG(ERROR) << "--no-inherit is needed when using --add-counter.";
+      return false;
+    }
+    if (!event_selection_set_.AddCounters(add_counters_)) {
+      return false;
+    }
   }
   if (!SetEventSelectionFlags()) {
     return false;
@@ -683,6 +722,8 @@ bool RecordCommand::DoRecording(Workload* workload) {
     return false;
   }
   time_stat_.finish_recording_time = GetSystemClock();
+  uint64_t recording_time = time_stat_.finish_recording_time - time_stat_.start_recording_time;
+  LOG(INFO) << "Recorded for " << recording_time / 1e9 << " seconds. Start post processing.";
   return true;
 }
 
@@ -778,13 +819,13 @@ bool RecordCommand::PostProcessRecording(const std::vector<std::string>& args) {
     }
   }
   LOG(DEBUG) << "Prepare recording time "
-             << (time_stat_.start_recording_time - time_stat_.prepare_recording_time) / 1e6
-             << " ms, recording time "
-             << (time_stat_.stop_recording_time - time_stat_.start_recording_time) / 1e6
-             << " ms, stop recording time "
-             << (time_stat_.finish_recording_time - time_stat_.stop_recording_time) / 1e6
-             << " ms, post process time "
-             << (time_stat_.post_process_time - time_stat_.finish_recording_time) / 1e6 << " ms.";
+             << (time_stat_.start_recording_time - time_stat_.prepare_recording_time) / 1e9
+             << " s, recording time "
+             << (time_stat_.stop_recording_time - time_stat_.start_recording_time) / 1e9
+             << " s, stop recording time "
+             << (time_stat_.finish_recording_time - time_stat_.stop_recording_time) / 1e9
+             << " s, post process time "
+             << (time_stat_.post_process_time - time_stat_.finish_recording_time) / 1e9 << " s.";
   return true;
 }
 
@@ -801,6 +842,10 @@ bool RecordCommand::ParseOptions(const std::vector<std::string>& args,
 
   // Process options.
   system_wide_collection_ = options.PullBoolValue("-a");
+
+  if (auto value = options.PullValue("--add-counter"); value) {
+    add_counters_ = android::base::Split(*value->str_value, ",");
+  }
 
   for (const OptionValue& value : options.PullValues("--add-meta-info")) {
     const std::string& s = *value.str_value;
@@ -922,7 +967,13 @@ bool RecordCommand::ParseOptions(const std::vector<std::string>& args,
   allow_cutting_samples_ = !options.PullBoolValue("--no-cut-samples");
   can_dump_kernel_symbols_ = !options.PullBoolValue("--no-dump-kernel-symbols");
   dump_symbols_ = !options.PullBoolValue("--no-dump-symbols");
-  child_inherit_ = !options.PullBoolValue("--no-inherit");
+  if (auto value = options.PullValue("--no-inherit"); value) {
+    child_inherit_ = false;
+  } else if (system_wide_collection_) {
+    // child_inherit is used to monitor newly created threads. It isn't useful in system wide
+    // collection, which monitors all threads running on selected cpus.
+    child_inherit_ = false;
+  }
   unwind_dwarf_callchain_ = !options.PullBoolValue("--no-unwind");
 
   if (auto value = options.PullValue("-o"); value) {
@@ -987,6 +1038,7 @@ bool RecordCommand::ParseOptions(const std::vector<std::string>& args,
       return false;
     }
   }
+  use_cmd_exit_code_ = options.PullBoolValue("--use-cmd-exit-code");
 
   CHECK(options.values.empty());
 
@@ -1108,7 +1160,7 @@ bool RecordCommand::ParseOptions(const std::vector<std::string>& args,
   }
 
   if (fp_callchain_sampling_) {
-    if (GetBuildArch() == ARCH_ARM) {
+    if (GetTargetArch() == ARCH_ARM) {
       LOG(WARNING) << "`--callgraph fp` option doesn't work well on arm architecture, "
                    << "consider using `-g` option or profiling on aarch64 architecture.";
     }
@@ -1185,14 +1237,20 @@ bool RecordCommand::TraceOffCpu() {
     return false;
   }
   // --trace-offcpu option only works with one of the selected event types.
-  std::set<std::string> accepted_events = {"cpu-cycles", "cpu-clock", "task-clock"};
+  std::set<std::string> accepted_events = {"cpu-clock", "task-clock"};
   std::vector<const EventType*> events = event_selection_set_.GetEvents();
   if (events.size() != 1 || accepted_events.find(events[0]->name) == accepted_events.end()) {
     LOG(ERROR) << "--trace-offcpu option only works with one of events "
                << android::base::Join(accepted_events, ' ');
     return false;
   }
-  return event_selection_set_.AddEventType("sched:sched_switch");
+  if (!event_selection_set_.AddEventType("sched:sched_switch")) {
+    return false;
+  }
+  if (IsSwitchRecordSupported()) {
+    event_selection_set_.EnableSwitchRecord();
+  }
+  return true;
 }
 
 bool RecordCommand::SetEventSelectionFlags() {
@@ -1916,6 +1974,11 @@ bool RecordCommand::DumpMetaInfoFeature(bool kernel_symbols_available) {
   info_map["android_version"] = android::base::GetProperty("ro.build.version.release", "");
   info_map["android_sdk_version"] = android::base::GetProperty("ro.build.version.sdk", "");
   info_map["android_build_type"] = android::base::GetProperty("ro.build.type", "");
+  info_map["android_build_fingerprint"] = android::base::GetProperty("ro.build.fingerprint", "");
+  utsname un;
+  if (uname(&un) == 0) {
+    info_map["kernel_version"] = un.release;
+  }
   if (!app_package_name_.empty()) {
     info_map["app_package_name"] = app_package_name_;
     if (IsRoot()) {
