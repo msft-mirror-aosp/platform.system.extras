@@ -165,6 +165,9 @@ std::string DebugElfFileFinder::FindDebugFile(const std::string& dso_path, bool 
     if (CheckDebugFilePath(path, build_id, true)) {
       return path;
     }
+    if (EndsWith(dso_path, ".apk") && IsRegularFile(path)) {
+      return path;
+    }
     // 3. Try concatenating symfs_dir and basename of dso_path.
     path = symfs_dir_ + OS_PATH_SEPARATOR + android::base::Basename(dso_path);
     if (CheckDebugFilePath(path, build_id, false)) {
@@ -227,6 +230,20 @@ void Symbol::SetDemangledName(std::string_view name) const {
   } else {
     demangled_name_ = symbol_name_allocator.AllocateString(name);
   }
+}
+
+std::string_view Symbol::FunctionName() const {
+  // Name with signature is like "void ctep.v(cteo, ctgc, ctbn)".
+  std::string_view name = DemangledName();
+  auto brace_pos = name.find('(');
+  if (brace_pos != name.npos) {
+    name = name.substr(0, brace_pos);
+    auto space_pos = name.rfind(' ');
+    if (space_pos != name.npos) {
+      name = name.substr(space_pos + 1);
+    }
+  }
+  return name;
 }
 
 static bool CompareSymbolToAddr(const Symbol& s, uint64_t addr) {
@@ -468,6 +485,12 @@ class DexFileDso : public Dso {
   std::vector<Symbol> LoadSymbolsImpl() override {
     std::vector<Symbol> symbols;
     auto tuple = SplitUrlInApk(debug_file_path_);
+    // Symbols of dex files are collected on device. If the dex file doesn't exist, probably
+    // we are reporting on host, and there is no need to report warning of missing dex files.
+    if (!IsRegularFile(std::get<0>(tuple) ? std::get<1>(tuple) : debug_file_path_)) {
+      LOG(DEBUG) << "skip reading symbols from non-exist dex_file " << debug_file_path_;
+      return symbols;
+    }
     bool status = false;
     auto symbol_callback = [&](DexFileSymbol* symbol) {
       symbols.emplace_back(symbol->name, symbol->addr, symbol->size);
@@ -478,8 +501,8 @@ class DexFileDso : public Dso {
       std::vector<uint8_t> data;
       if (ahelper && ahelper->FindEntry(std::get<2>(tuple), &entry) &&
           ahelper->GetEntryData(entry, &data)) {
-        status = ReadSymbolsFromDexFileInMemory(data.data(), data.size(), dex_file_offsets_,
-                                                symbol_callback);
+        status = ReadSymbolsFromDexFileInMemory(data.data(), data.size(), debug_file_path_,
+                                                dex_file_offsets_, symbol_callback);
       }
     } else {
       status = ReadSymbolsFromDexFile(debug_file_path_, dex_file_offsets_, symbol_callback);
@@ -487,10 +510,10 @@ class DexFileDso : public Dso {
     if (!status) {
       android::base::LogSeverity level =
           symbols_.empty() ? android::base::WARNING : android::base::DEBUG;
-      LOG(level) << "Failed to read symbols from " << debug_file_path_;
+      LOG(level) << "Failed to read symbols from dex_file " << debug_file_path_;
       return symbols;
     }
-    LOG(VERBOSE) << "Read symbols from " << debug_file_path_ << " successfully";
+    LOG(VERBOSE) << "Read symbols from dex_file " << debug_file_path_ << " successfully";
     SortAndFixSymbols(symbols);
     return symbols;
   }
