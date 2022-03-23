@@ -24,7 +24,6 @@
 #include <memory>
 #include <mutex>
 #include <thread>
-#include <unordered_set>
 
 #include <android-base/macros.h>
 #include <android-base/unique_fd.h>
@@ -41,7 +40,6 @@ class RecordBuffer {
  public:
   RecordBuffer(size_t buffer_size);
   size_t size() const { return buffer_size_; }
-  char* BufferEnd() const { return buffer_.get() + buffer_size_; }
 
   // Return the size of writable space in the buffer.
   size_t GetFreeSize() const;
@@ -81,12 +79,11 @@ class RecordParser {
 
  private:
   uint64_t sample_type_;
-  uint64_t read_format_;
   uint64_t sample_regs_count_;
   size_t pid_pos_in_sample_records_ = 0;
   size_t time_pos_in_sample_records_ = 0;
   size_t time_rpos_in_non_sample_records_ = 0;
-  size_t read_pos_in_sample_records_ = 0;
+  size_t callchain_pos_in_sample_records_ = 0;
 };
 
 struct RecordStat {
@@ -210,8 +207,6 @@ class RecordReadThread {
   std::unique_ptr<std::thread> read_thread_;
   std::vector<KernelRecordReader> kernel_record_readers_;
   pid_t exclude_pid_ = -1;
-
-  std::unordered_set<EventFd*> event_fds_disabled_by_kernel_;
 
   RecordStat stat_;
 };
