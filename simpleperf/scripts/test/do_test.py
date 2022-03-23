@@ -39,16 +39,14 @@ import types
 from typing import List, Optional
 import unittest
 
-from simpleperf_utils import BaseArgumentParser, extant_dir, log_exit, remove
+from simpleperf_utils import extant_dir, log_exit, remove, ArgParseFormatter
 
 from . api_profiler_test import *
-from . annotate_test import *
 from . app_profiler_test import *
 from . app_test import *
 from . binary_cache_builder_test import *
 from . cpp_app_test import *
 from . debug_unwind_reporter_test import *
-from . gecko_profile_generator_test import *
 from . inferno_test import *
 from . java_app_test import *
 from . kotlin_app_test import *
@@ -56,15 +54,13 @@ from . pprof_proto_generator_test import *
 from . purgatorio_test import *
 from . report_html_test import *
 from . report_lib_test import *
-from . report_sample_test import *
 from . run_simpleperf_on_device_test import *
-from . stackcollapse_test import *
 from . tools_test import *
 from . test_utils import TestHelper
 
 
 def get_args() -> argparse.Namespace:
-    parser = BaseArgumentParser(description=__doc__)
+    parser = argparse.ArgumentParser(description=__doc__, formatter_class=ArgParseFormatter)
     parser.add_argument('--browser', action='store_true', help='open report html file in browser.')
     parser.add_argument(
         '-d', '--device', nargs='+',
@@ -124,18 +120,9 @@ def get_test_type(test: str) -> Optional[str]:
         return 'device_test'
     if testcase_name.startswith('TestExample'):
         return 'device_test'
-    if testcase_name in ('TestAnnotate',
-                         'TestBinaryCacheBuilder',
-                         'TestDebugUnwindReporter',
-                         'TestInferno',
-                         'TestPprofProtoGenerator',
-                         'TestPurgatorio',
-                         'TestReportHtml',
-                         'TestReportLib',
-                         'TestReportSample',
-                         'TestStackCollapse',
-                         'TestTools',
-                         'TestGeckoProfileGenerator'):
+    if testcase_name in ('TestBinaryCacheBuilder', 'TestDebugUnwindReporter', 'TestInferno',
+                         'TestPprofProtoGenerator', 'TestPurgatorio', 'TestReportHtml',
+                         'TestReportLib', 'TestTools'):
         return 'host_test'
     return None
 
@@ -205,15 +192,6 @@ class Device:
 class TestResult:
     try_time: int
     ok: bool
-    duration: str
-
-    def __str__(self) -> str:
-        if self.ok:
-            s = 'OK'
-        else:
-            s = f'FAILED (at try_time {self.try_time})'
-        s += f' {self.duration}'
-        return s
 
 
 class TestProcess:
@@ -287,9 +265,9 @@ class TestProcess:
             self.proc.terminate()
 
     def _process_msg(self, msg: str):
-        test_name, test_success, test_duration = msg.split()
+        test_name, test_success = msg.split()
         test_success = test_success == 'OK'
-        self.test_results[test_name] = TestResult(self.try_time, test_success, test_duration)
+        self.test_results[test_name] = TestResult(self.try_time, test_success)
 
     def join(self):
         self.proc.join()
@@ -302,8 +280,7 @@ class TestProcess:
             """ Exceed max try time. So mark left tests as failed. """
             for test in self.tests:
                 if test not in self.test_results:
-                    test_duration = '%.3fs' % (time.time() - self.last_update_time)
-                    self.test_results[test] = TestResult(self.try_time, False, test_duration)
+                    self.test_results[test] = TestResult(self.try_time, False)
             return False
 
         self.try_time += 1
@@ -320,6 +297,8 @@ class ProgressBar:
 
     def update(self, test_proc: TestProcess):
         if test_proc.name not in self.test_process_bars:
+            if not test_proc.alive:
+                return
             bar = tqdm(total=len(test_proc.tests),
                        desc=test_proc.name, ascii=' ##',
                        bar_format="{l_bar}{bar} | {n_fmt}/{total_fmt} [{elapsed}]")
@@ -331,10 +310,8 @@ class ProgressBar:
         if add:
             bar.update(add)
             self.total_bar.update(add)
-
-    def end_test_proc(self, test_proc: TestProcess):
-        if test_proc.name in self.test_process_bars:
-            self.test_process_bars[test_proc.name].close()
+        if not test_proc.alive:
+            bar.close()
             del self.test_process_bars[test_proc.name]
 
     def end_tests(self):
@@ -344,55 +321,39 @@ class ProgressBar:
 
 
 class TestSummary:
-    def __init__(
-            self, devices: List[Device],
-            device_tests: List[str],
-            repeat_count: int, host_tests: List[str]):
-        self.results: Dict[Tuple[str, str], Optional[TestResult]] = {}
-        for test in device_tests:
-            for device in devices:
-                for repeat_index in range(1, repeat_count + 1):
-                    self.results[(test, '%s_repeat_%d' % (device.name, repeat_index))] = None
-        for test in host_tests:
-            self.results[(test, 'host')] = None
-        self.write_summary()
-
-    @property
-    def test_count(self) -> int:
-        return len(self.results)
+    def __init__(self, test_count: int):
+        self.summary_fh = open('test_summary.txt', 'w')
+        self.failed_summary_fh = open('failed_test_summary.txt', 'w')
+        self.results: Dict[Tuple[str, str], bool] = {}
+        self.test_count = test_count
 
     @property
     def failed_test_count(self) -> int:
-        count = 0
-        for result in self.results.values():
-            if result is None or not result.ok:
-                count += 1
-        return count
+        return self.test_count - sum(1 for result in self.results.values() if result)
 
     def update(self, test_proc: TestProcess):
-        if test_proc.device:
-            test_env = '%s_repeat_%d' % (test_proc.device.name, test_proc.repeat_index)
-        else:
-            test_env = 'host'
-        has_update = False
         for test, result in test_proc.test_results.items():
-            key = (test, test_env)
-            if self.results[key] != result:
-                self.results[key] = result
-                has_update = True
-        if has_update:
-            self.write_summary()
+            key = (test, '%s_try_%s' % (test_proc.name, result.try_time))
+            if key not in self.results:
+                self.results[key] = result.ok
+                self._write_result(key[0], key[1], result.ok)
 
-    def write_summary(self):
-        with open('test_summary.txt', 'w') as fh, \
-                open('failed_test_summary.txt', 'w') as failed_fh:
-            for key in sorted(self.results.keys()):
-                test_name, test_env = key
-                result = self.results[key]
-                message = f'{test_name}    {test_env}    {result}'
-                print(message, file=fh)
-                if not result or not result.ok:
-                    print(message, file=failed_fh)
+    def _write_result(self, test_name: str, test_env: str, test_result: bool):
+        print(
+            '%s    %s    %s' % (test_name, test_env, 'OK' if test_result else 'FAILED'),
+            file=self.summary_fh, flush=True)
+        if not test_result:
+            print('%s    %s    FAILED' % (test_name, test_env),
+                  file=self.failed_summary_fh, flush=True)
+
+    def end_tests(self):
+        # Show sorted results after testing.
+        self.summary_fh.seek(0, 0)
+        self.failed_summary_fh.seek(0, 0)
+        for key in sorted(self.results.keys()):
+            self._write_result(key[0], key[1], self.results[key])
+        self.summary_fh.close()
+        self.failed_summary_fh.close()
 
 
 class TestManager:
@@ -409,7 +370,7 @@ class TestManager:
         devices = []
         if args.device:
             for s in args.device:
-                name, serial_number = s.split(':', 1)
+                name, serial_number = s.split(':')
                 devices.append(Device(name, serial_number))
         else:
             devices.append(Device('default', ''))
@@ -441,8 +402,7 @@ class TestManager:
         total_test_count = (len(device_tests) + len(device_serialized_tests)
                             ) * len(self.devices) * self.repeat_count + len(host_tests)
         self.progress_bar = ProgressBar(total_test_count)
-        self.test_summary = TestSummary(self.devices, device_tests + device_serialized_tests,
-                                        self.repeat_count, host_tests)
+        self.test_summary = TestSummary(total_test_count)
         if device_tests:
             self.run_device_tests(device_tests)
         if device_serialized_tests:
@@ -451,6 +411,7 @@ class TestManager:
             self.run_host_tests(host_tests)
         self.progress_bar.end_tests()
         self.progress_bar = None
+        self.test_summary.end_tests()
 
     def run_device_tests(self, tests: List[str]):
         """ Tests can run in parallel on different devices. """
@@ -485,13 +446,8 @@ class TestManager:
             # Process dead procs.
             for test_proc in dead_procs:
                 test_proc.join()
-                if not test_proc.finished:
-                    if test_proc.restart():
-                        continue
-                    else:
-                        self.progress_bar.update(test_proc)
-                        self.test_summary.update(test_proc)
-                self.progress_bar.end_test_proc(test_proc)
+                if not test_proc.finished and test_proc.restart():
+                    continue
                 test_procs.remove(test_proc)
                 if test_proc.repeat_index < repeat_count:
                     test_procs.append(

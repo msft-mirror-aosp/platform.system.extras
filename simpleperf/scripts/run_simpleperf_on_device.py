@@ -21,11 +21,11 @@
 """
 import subprocess
 import sys
-from simpleperf_utils import AdbHelper, get_target_binary_path, Log
+from simpleperf_utils import AdbHelper, disable_debug_log, get_target_binary_path
 
 
 def main():
-    Log.init()
+    disable_debug_log()
     adb = AdbHelper()
     device_arch = adb.get_device_arch()
     simpleperf_binary = get_target_binary_path(device_arch, 'simpleperf')
