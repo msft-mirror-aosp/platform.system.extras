@@ -1,3 +1,4 @@
 #!/bin/bash
 SCRIPTPATH=$(dirname "$0")
-$SCRIPTPATH/inferno/inferno.py "$@"
+export PYTHONPATH=$SCRIPTPATH:$PYTHONPATH
+python -m inferno.inferno "$@"

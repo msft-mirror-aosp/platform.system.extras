@@ -17,12 +17,7 @@
 package com.android.simpleperf;
 
 import android.os.Build;
-import android.system.Os;
 import android.system.OsConstants;
-
-import android.support.annotation.NonNull;
-import android.support.annotation.Nullable;
-import android.support.annotation.RequiresApi;
 
 import java.io.BufferedReader;
 import java.io.File;
@@ -60,7 +55,6 @@ import java.util.stream.Collectors;
  * process, filter logcat with `simpleperf`.
  * </p>
  */
-@RequiresApi(28)
 public class ProfileSession {
     private static final String SIMPLEPERF_PATH_IN_IMAGE = "/system/bin/simpleperf";
 
@@ -71,27 +65,27 @@ public class ProfileSession {
         STOPPED,
     }
 
-    private State mState = State.NOT_YET_STARTED;
-    private final String mAppDataDir;
-    private String mSimpleperfPath;
-    private final String mSimpleperfDataDir;
-    private Process mSimpleperfProcess;
-    private boolean mTraceOffCpu = false;
+    private State state = State.NOT_YET_STARTED;
+    private String appDataDir;
+    private String simpleperfPath;
+    private String simpleperfDataDir;
+    private Process simpleperfProcess;
+    private boolean traceOffcpu = false;
 
     /**
      * @param appDataDir the same as android.content.Context.getDataDir().
      *                   ProfileSession stores profiling data in appDataDir/simpleperf_data/.
      */
-    public ProfileSession(@NonNull String appDataDir) {
-        mAppDataDir = appDataDir;
-        mSimpleperfDataDir = appDataDir + "/simpleperf_data";
+    public ProfileSession(String appDataDir) {
+        this.appDataDir = appDataDir;
+        simpleperfDataDir = appDataDir + "/simpleperf_data";
     }
 
     /**
      * ProfileSession assumes appDataDir as /data/data/app_package_name.
      */
     public ProfileSession() {
-        String packageName;
+        String packageName = "";
         try {
             String s = readInputStream(new FileInputStream("/proc/self/cmdline"));
             for (int i = 0; i < s.length(); i++) {
@@ -107,22 +101,15 @@ public class ProfileSession {
         if (packageName.isEmpty()) {
             throw new Error("failed to find packageName");
         }
-        final int AID_USER_OFFSET = 100000;
-        int uid = Os.getuid();
-        if (uid >= AID_USER_OFFSET) {
-            int user_id = uid / AID_USER_OFFSET;
-            mAppDataDir = "/data/user/" + user_id + "/" + packageName;
-        } else {
-            mAppDataDir = "/data/data/" + packageName;
-        }
-        mSimpleperfDataDir = mAppDataDir + "/simpleperf_data";
+        appDataDir = "/data/data/" + packageName;
+        simpleperfDataDir = appDataDir + "/simpleperf_data";
     }
 
     /**
      * Start recording.
      * @param options RecordOptions
      */
-    public void startRecording(@NonNull RecordOptions options) {
+    public void startRecording(RecordOptions options) {
         startRecording(options.toRecordArgs());
     }
 
@@ -130,77 +117,77 @@ public class ProfileSession {
      * Start recording.
      * @param args arguments for `simpleperf record` cmd.
      */
-    public synchronized void startRecording(@NonNull List<String> args) {
-        if (mState != State.NOT_YET_STARTED) {
-            throw new AssertionError("startRecording: session in wrong state " + mState);
+    public synchronized void startRecording(List<String> args) {
+        if (state != State.NOT_YET_STARTED) {
+            throw new AssertionError("startRecording: session in wrong state " + state);
         }
         for (String arg : args) {
             if (arg.equals("--trace-offcpu")) {
-                mTraceOffCpu = true;
+                traceOffcpu = true;
             }
         }
-        mSimpleperfPath = findSimpleperf();
+        simpleperfPath = findSimpleperf();
         checkIfPerfEnabled();
         createSimpleperfDataDir();
-        createSimpleperfProcess(mSimpleperfPath, args);
-        mState = State.STARTED;
+        createSimpleperfProcess(simpleperfPath, args);
+        state = State.STARTED;
     }
 
     /**
      * Pause recording. No samples are generated in paused state.
      */
     public synchronized void pauseRecording() {
-        if (mState != State.STARTED) {
-            throw new AssertionError("pauseRecording: session in wrong state " + mState);
+        if (state != State.STARTED) {
+            throw new AssertionError("pauseRecording: session in wrong state " + state);
         }
-        if (mTraceOffCpu) {
+        if (traceOffcpu) {
             throw new AssertionError(
                     "--trace-offcpu option doesn't work well with pause/resume recording");
         }
         sendCmd("pause");
-        mState = State.PAUSED;
+        state = State.PAUSED;
     }
 
     /**
      * Resume a paused session.
      */
     public synchronized void resumeRecording() {
-        if (mState != State.PAUSED) {
-            throw new AssertionError("resumeRecording: session in wrong state " + mState);
+        if (state != State.PAUSED) {
+            throw new AssertionError("resumeRecording: session in wrong state " + state);
         }
         sendCmd("resume");
-        mState = State.STARTED;
+        state = State.STARTED;
     }
 
     /**
      * Stop recording and generate a recording file under appDataDir/simpleperf_data/.
      */
     public synchronized void stopRecording() {
-        if (mState != State.STARTED && mState != State.PAUSED) {
-            throw new AssertionError("stopRecording: session in wrong state " + mState);
+        if (state != State.STARTED && state != State.PAUSED) {
+            throw new AssertionError("stopRecording: session in wrong state " + state);
         }
-        if (Build.VERSION.SDK_INT == Build.VERSION_CODES.P + 1
-                && mSimpleperfPath.equals(SIMPLEPERF_PATH_IN_IMAGE)) {
+        if (Build.VERSION.SDK_INT == Build.VERSION_CODES.P + 1 &&
+                simpleperfPath.equals(SIMPLEPERF_PATH_IN_IMAGE)) {
             // The simpleperf shipped on Android Q contains a bug, which may make it abort if
             // calling simpleperfProcess.destroy().
             destroySimpleperfProcessWithoutClosingStdin();
         } else {
-            mSimpleperfProcess.destroy();
+            simpleperfProcess.destroy();
         }
         try {
-            int exitCode = mSimpleperfProcess.waitFor();
+            int exitCode = simpleperfProcess.waitFor();
             if (exitCode != 0) {
                 throw new AssertionError("simpleperf exited with error: " + exitCode);
             }
         } catch (InterruptedException e) {
         }
-        mSimpleperfProcess = null;
-        mState = State.STOPPED;
+        simpleperfProcess = null;
+        state = State.STOPPED;
     }
 
     private void destroySimpleperfProcessWithoutClosingStdin() {
         // In format "Process[pid=? ..."
-        String s = mSimpleperfProcess.toString();
+        String s = simpleperfProcess.toString();
         final String prefix = "Process[pid=";
         if (s.startsWith(prefix)) {
             int startIndex = prefix.length();
@@ -211,7 +198,7 @@ public class ProfileSession {
                 return;
             }
         }
-        mSimpleperfProcess.destroy();
+        simpleperfProcess.destroy();
     }
 
     private String readInputStream(InputStream in) {
@@ -238,20 +225,19 @@ public class ProfileSession {
         throw new Error("can't find simpleperf on device. Please run api_profiler.py.");
     }
 
-    private boolean isExecutableFile(@NonNull String path) {
+    private boolean isExecutableFile(String path) {
         File file = new File(path);
         return file.canExecute();
     }
 
-    @Nullable
     private String findSimpleperfInTempDir() {
         String path = "/data/local/tmp/simpleperf";
         File file = new File(path);
-        if (!file.isFile()) {
+        if (!file.isFile()){
             return null;
         }
         // Copy it to app dir to execute it.
-        String toPath = mAppDataDir + "/simpleperf";
+        String toPath = appDataDir + "/simpleperf";
         try {
             Process process = new ProcessBuilder()
                     .command("cp", path, toPath).start();
@@ -266,10 +252,10 @@ public class ProfileSession {
         // For android R, app context isn't allowed to use perf_event_open.
         // So test executing downloaded simpleperf.
         try {
-            Process process = new ProcessBuilder().command(toPath, "list", "sw").start();
+            Process process = new ProcessBuilder().command(toPath + "list sw").start();
             process.waitFor();
             String data = readInputStream(process.getInputStream());
-            if (!data.contains("cpu-clock")) {
+            if (data.indexOf("cpu-clock") == -1) {
                 return null;
             }
         } catch (Exception e) {
@@ -279,7 +265,7 @@ public class ProfileSession {
     }
 
     private void checkIfPerfEnabled() {
-        String value;
+        String value = "";
         Process process;
         try {
             process = new ProcessBuilder()
@@ -294,13 +280,13 @@ public class ProfileSession {
         }
         value = readInputStream(process.getInputStream());
         if (value.startsWith("1")) {
-            throw new Error("linux perf events aren't enabled on the device."
-                    + " Please run api_profiler.py.");
+            throw new Error("linux perf events aren't enabled on the device." +
+                            " Please run api_profiler.py.");
         }
     }
 
     private void createSimpleperfDataDir() {
-        File file = new File(mSimpleperfDataDir);
+        File file = new File(simpleperfDataDir);
         if (!file.isDirectory()) {
             file.mkdir();
         }
@@ -321,9 +307,9 @@ public class ProfileSession {
         args.addAll(recordArgs);
 
         // 2. Create the simpleperf process.
-        ProcessBuilder pb = new ProcessBuilder(args).directory(new File(mSimpleperfDataDir));
+        ProcessBuilder pb = new ProcessBuilder(args).directory(new File(simpleperfDataDir));
         try {
-            mSimpleperfProcess = pb.start();
+            simpleperfProcess = pb.start();
         } catch (IOException e) {
             throw new Error("failed to create simpleperf process: " + e.getMessage());
         }
@@ -335,11 +321,11 @@ public class ProfileSession {
         }
     }
 
-    private void sendCmd(@NonNull String cmd) {
+    private void sendCmd(String cmd) {
         cmd += "\n";
         try {
-            mSimpleperfProcess.getOutputStream().write(cmd.getBytes());
-            mSimpleperfProcess.getOutputStream().flush();
+            simpleperfProcess.getOutputStream().write(cmd.getBytes());
+            simpleperfProcess.getOutputStream().flush();
         } catch (IOException e) {
             throw new Error("failed to send cmd to simpleperf: " + e.getMessage());
         }
@@ -348,7 +334,6 @@ public class ProfileSession {
         }
     }
 
-    @NonNull
     private String readReply() {
         // Read one byte at a time to stop at line break or EOF. BufferedReader will try to read
         // more than available and make us blocking, so don't use it.
@@ -356,13 +341,13 @@ public class ProfileSession {
         while (true) {
             int c = -1;
             try {
-                c = mSimpleperfProcess.getInputStream().read();
+                c = simpleperfProcess.getInputStream().read();
             } catch (IOException e) {
             }
             if (c == -1 || c == '\n') {
                 break;
             }
-            s += (char) c;
+            s += (char)c;
         }
         return s;
     }

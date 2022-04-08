@@ -22,11 +22,11 @@
 #include "utils.h"
 #include "workload.h"
 
-using namespace simpleperf;
-
 TEST(workload, success) {
   IOEventLoop loop;
-  ASSERT_TRUE(loop.AddSignalEvent(SIGCHLD, [&]() { return loop.ExitLoop(); }));
+  ASSERT_TRUE(loop.AddSignalEvent(SIGCHLD, [&]() {
+    return loop.ExitLoop();
+  }));
   auto workload = Workload::CreateWorkload({"sleep", "1"});
   ASSERT_TRUE(workload != nullptr);
   ASSERT_TRUE(workload->GetPid() != 0);
@@ -43,7 +43,9 @@ TEST(workload, execvp_failure) {
 static void run_signaled_workload() {
   {
     IOEventLoop loop;
-    ASSERT_TRUE(loop.AddSignalEvent(SIGCHLD, [&]() { return loop.ExitLoop(); }));
+    ASSERT_TRUE(loop.AddSignalEvent(SIGCHLD, [&]() {
+      return loop.ExitLoop();
+    }));
     auto workload = Workload::CreateWorkload({"sleep", "10"});
     ASSERT_TRUE(workload != nullptr);
     ASSERT_TRUE(workload->Start());
@@ -62,7 +64,9 @@ TEST(workload, signaled_warning) {
 static void run_exit_nonzero_workload() {
   {
     IOEventLoop loop;
-    ASSERT_TRUE(loop.AddSignalEvent(SIGCHLD, [&]() { return loop.ExitLoop(); }));
+    ASSERT_TRUE(loop.AddSignalEvent(SIGCHLD, [&]() {
+      return loop.ExitLoop();
+    }));
     auto workload = Workload::CreateWorkload({"ls", "nonexistdir"});
     ASSERT_TRUE(workload != nullptr);
     ASSERT_TRUE(workload->Start());

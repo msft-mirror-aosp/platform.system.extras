@@ -16,8 +16,6 @@
 
 #include "command.h"
 
-#include <string.h>
-
 #include <algorithm>
 #include <map>
 #include <string>
@@ -29,7 +27,7 @@
 
 #include "utils.h"
 
-namespace simpleperf {
+using namespace simpleperf;
 
 bool Command::NextArgumentOrError(const std::vector<std::string>& args, size_t* pi) {
   if (*pi + 1 == args.size()) {
@@ -38,89 +36,6 @@ bool Command::NextArgumentOrError(const std::vector<std::string>& args, size_t* 
     return false;
   }
   ++*pi;
-  return true;
-}
-
-bool Command::PreprocessOptions(const std::vector<std::string>& args,
-                                const OptionFormatMap& option_formats, OptionValueMap* options,
-                                std::vector<std::pair<OptionName, OptionValue>>* ordered_options,
-                                std::vector<std::string>* non_option_args) {
-  options->values.clear();
-  ordered_options->clear();
-  size_t i;
-  for (i = 0; i < args.size() && !args[i].empty() && args[i][0] == '-'; i++) {
-    auto it = option_formats.find(args[i]);
-    if (it == option_formats.end()) {
-      if (args[i] == "--") {
-        i++;
-        break;
-      }
-      ReportUnknownOption(args, i);
-      return false;
-    }
-    const OptionName& name = it->first;
-    const OptionFormat& format = it->second;
-    OptionValue value;
-    memset(&value, 0, sizeof(value));
-
-    if (i + 1 == args.size()) {
-      if (format.value_type != OptionValueType::NONE &&
-          format.value_type != OptionValueType::OPT_STRING) {
-        LOG(ERROR) << "No argument following " << name << " option. Try `simpleperf help " << name_
-                   << "`";
-        return false;
-      }
-    } else {
-      switch (format.value_type) {
-        case OptionValueType::NONE:
-          break;
-        case OptionValueType::STRING:
-          value.str_value = &args[++i];
-          break;
-        case OptionValueType::OPT_STRING:
-          if (!args[i + 1].empty() && args[i + 1][0] != '-') {
-            value.str_value = &args[++i];
-          }
-          break;
-        case OptionValueType::UINT:
-          if (!android::base::ParseUint(args[++i], &value.uint_value,
-                                        std::numeric_limits<uint64_t>::max(), true)) {
-            LOG(ERROR) << "Invalid argument for option " << name << ": " << args[i];
-            return false;
-          }
-          break;
-        case OptionValueType::DOUBLE:
-          if (!android::base::ParseDouble(args[++i], &value.double_value)) {
-            LOG(ERROR) << "Invalid argument for option " << name << ": " << args[i];
-            return false;
-          }
-          break;
-      }
-    }
-
-    switch (format.type) {
-      case OptionType::SINGLE:
-        if (auto it = options->values.find(name); it != options->values.end()) {
-          it->second = value;
-        } else {
-          options->values.emplace(name, value);
-        }
-        break;
-      case OptionType::MULTIPLE:
-        options->values.emplace(name, value);
-        break;
-      case OptionType::ORDERED:
-        ordered_options->emplace_back(name, value);
-        break;
-    }
-  }
-  if (i < args.size()) {
-    if (non_option_args == nullptr) {
-      LOG(ERROR) << "Invalid option " << args[i] << ". Try `simpleperf help " << name_ << "`";
-      return false;
-    }
-    non_option_args->assign(args.begin() + i, args.end());
-  }
   return true;
 }
 
@@ -177,7 +92,6 @@ extern void RegisterHelpCommand();
 extern void RegisterInjectCommand();
 extern void RegisterListCommand();
 extern void RegisterKmemCommand();
-extern void RegisterMergeCommand();
 extern void RegisterRecordCommand();
 extern void RegisterReportCommand();
 extern void RegisterReportSampleCommand();
@@ -185,7 +99,6 @@ extern void RegisterStatCommand();
 extern void RegisterDebugUnwindCommand();
 extern void RegisterTraceSchedCommand();
 extern void RegisterAPICommands();
-extern void RegisterMonitorCommand();
 
 class CommandRegister {
  public:
@@ -194,7 +107,6 @@ class CommandRegister {
     RegisterHelpCommand();
     RegisterInjectCommand();
     RegisterKmemCommand();
-    RegisterMergeCommand();
     RegisterReportCommand();
     RegisterReportSampleCommand();
 #if defined(__linux__)
@@ -203,7 +115,6 @@ class CommandRegister {
     RegisterStatCommand();
     RegisterDebugUnwindCommand();
     RegisterTraceSchedCommand();
-    RegisterMonitorCommand();
 #if defined(__ANDROID__)
     RegisterAPICommands();
 #endif
@@ -213,57 +124,49 @@ class CommandRegister {
 
 CommandRegister command_register;
 
-static void StderrLogger(android::base::LogId, android::base::LogSeverity severity, const char*,
-                         const char* file, unsigned int line, const char* message) {
+static void StderrLogger(android::base::LogId, android::base::LogSeverity severity,
+                         const char*, const char* file, unsigned int line, const char* message) {
   static const char log_characters[] = "VDIWEFF";
   char severity_char = log_characters[severity];
   fprintf(stderr, "simpleperf %c %s:%u] %s\n", severity_char, file, line, message);
 }
 
+namespace simpleperf {
 bool log_to_android_buffer = false;
+}
 
 bool RunSimpleperfCmd(int argc, char** argv) {
   android::base::InitLogging(argv, StderrLogger);
   std::vector<std::string> args;
   android::base::LogSeverity log_severity = android::base::INFO;
   log_to_android_buffer = false;
-  const OptionFormatMap& common_option_formats = GetCommonOptionFormatMap();
 
-  int i;
-  for (i = 1; i < argc && strcmp(argv[i], "--") != 0; ++i) {
-    std::string option_name = argv[i];
-    auto it = common_option_formats.find(option_name);
-    if (it == common_option_formats.end()) {
-      args.emplace_back(std::move(option_name));
-      continue;
-    }
-    if (it->second.value_type != OptionValueType::NONE && i + 1 == argc) {
-      LOG(ERROR) << "Missing argument for " << option_name;
-      return false;
-    }
-    if (option_name == "-h" || option_name == "--help") {
+  for (int i = 1; i < argc; ++i) {
+    if (strcmp(argv[i], "--help") == 0 || strcmp(argv[i], "-h") == 0) {
       args.insert(args.begin(), "help");
-    } else if (option_name == "--log") {
-      if (!GetLogSeverity(argv[i + 1], &log_severity)) {
-        LOG(ERROR) << "Unknown log severity: " << argv[i + 1];
+    } else if (strcmp(argv[i], "--log") == 0) {
+      if (i + 1 < argc) {
+        ++i;
+        if (!GetLogSeverity(argv[i], &log_severity)) {
+          LOG(ERROR) << "Unknown log severity: " << argv[i];
+          return false;
+        }
+      } else {
+        LOG(ERROR) << "Missing argument for --log option.\n";
+        return false;
       }
-      ++i;
 #if defined(__ANDROID__)
-    } else if (option_name == "--log-to-android-buffer") {
+    } else if (strcmp(argv[i], "--log-to-android-buffer") == 0) {
       android::base::SetLogger(android::base::LogdLogger());
       log_to_android_buffer = true;
 #endif
-    } else if (option_name == "--version") {
+    } else if (strcmp(argv[i], "--version") == 0) {
       LOG(INFO) << "Simpleperf version " << GetSimpleperfVersion();
       return true;
     } else {
-      CHECK(false) << "Unreachable code";
+      args.push_back(argv[i]);
     }
   }
-  while (i < argc) {
-    args.emplace_back(argv[i++]);
-  }
-
   android::base::ScopedLogSeverity severity(log_severity);
 
   if (args.empty()) {
@@ -287,5 +190,3 @@ bool RunSimpleperfCmd(int argc, char** argv) {
   _Exit(result ? 0 : 1);
   return result;
 }
-
-}  // namespace simpleperf

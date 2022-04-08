@@ -22,8 +22,8 @@
 #include <memory>
 
 #include "event_type.h"
-#include "perf_event.h"
 #include "record.h"
+#include "perf_event.h"
 
 namespace simpleperf {
 
@@ -38,7 +38,6 @@ struct ETMPerCpu {
   int GetMajorVersion() const;
   bool IsContextIDSupported() const;
   bool IsTimestampSupported() const;
-  bool IsEnabled() const;
 };
 
 // Help recording Coresight ETM data on ARM devices.
@@ -75,4 +74,4 @@ class ETMRecorder {
   std::map<int, ETMPerCpu> etm_info_;
 };
 
-}  // namespace simpleperf
+} // namespace simpleperf

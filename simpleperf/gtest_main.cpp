@@ -36,8 +36,6 @@
 #include "utils.h"
 #include "workload.h"
 
-using namespace simpleperf;
-
 static std::string testdata_dir;
 
 #if defined(__ANDROID__)
@@ -60,7 +58,7 @@ class ScopedEnablingPerf {
     android::base::SetProperty("security.perf_harden", value);
 
     // Sleep one second to wait for security.perf_harden changing
-    // perf_event_allow_path.
+    // /proc/sys/kernel/perf_event_paranoid.
     sleep(1);
   }
 
@@ -99,7 +97,8 @@ int main(int argc, char** argv) {
   android::base::ScopedLogSeverity severity(log_severity);
 
 #if defined(__ANDROID__)
-  // A cts test is testing if perf_event_allow_path is 3, so restore perf_harden
+  // A cts test PerfEventParanoidTest.java is testing if
+  // /proc/sys/kernel/perf_event_paranoid is 3, so restore perf_harden
   // value after current test to not break that test.
   ScopedEnablingPerf scoped_enabling_perf;
 #endif

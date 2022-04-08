@@ -22,15 +22,16 @@
 #include <android-base/file.h>
 #include <android-base/logging.h>
 
-#include "ETMRecorder.h"
 #include "command.h"
 #include "environment.h"
+#include "ETMRecorder.h"
 #include "event_attr.h"
 #include "event_fd.h"
 #include "event_selection_set.h"
 #include "event_type.h"
 
-namespace simpleperf {
+using namespace simpleperf;
+
 namespace {
 
 enum EventTypeStatus {
@@ -46,7 +47,8 @@ static EventTypeStatus IsEventTypeSupported(const EventType& event_type) {
   }
   if (event_type.type != PERF_TYPE_RAW) {
     perf_event_attr attr = CreateDefaultPerfEventAttr(event_type);
-    // Exclude kernel to list supported events even when kernel recording isn't allowed.
+    // Exclude kernel to list supported events even when
+    // /proc/sys/kernel/perf_event_paranoid is 2.
     attr.exclude_kernel = 1;
     return IsEventAttrSupported(attr, event_type.name) ? EventTypeStatus::SUPPORTED
                                                        : EventTypeStatus::NOT_SUPPORTED;
@@ -85,7 +87,8 @@ static EventTypeStatus IsEventTypeSupported(const EventType& event_type) {
 }
 
 static void PrintEventTypesOfType(const std::string& type_name, const std::string& type_desc,
-                                  const std::function<bool(const EventType&)>& is_type_fn) {
+                                  const std::function<bool(const EventType&)>& is_type_fn,
+                                  const std::set<EventType>& event_types) {
   printf("List of %s:\n", type_desc.c_str());
   if (GetBuildArch() == ARCH_ARM || GetBuildArch() == ARCH_ARM64) {
     if (type_name == "raw") {
@@ -101,11 +104,11 @@ static void PrintEventTypesOfType(const std::string& type_name, const std::strin
       printf("  # More cache events are available in `simpleperf list raw`.\n");
     }
   }
-  auto callback = [&](const EventType& event_type) {
+  for (auto& event_type : event_types) {
     if (is_type_fn(event_type)) {
       EventTypeStatus status = IsEventTypeSupported(event_type);
       if (status == EventTypeStatus::NOT_SUPPORTED) {
-        return true;
+        continue;
       }
       printf("  %s", event_type.name.c_str());
       if (status == EventTypeStatus::MAY_NOT_SUPPORTED) {
@@ -116,9 +119,7 @@ static void PrintEventTypesOfType(const std::string& type_name, const std::strin
       }
       printf("\n");
     }
-    return true;
-  };
-  EventTypeManager::Instance().ForEachType(callback);
+  }
   printf("\n");
 }
 
@@ -142,7 +143,8 @@ class ListCommand : public Command {
 "                     dwarf-based-call-graph\n"
 "                     trace-offcpu\n"
                 // clang-format on
-        ) {}
+                ) {
+  }
 
   bool Run(const std::vector<std::string>& args) override;
 
@@ -156,22 +158,28 @@ bool ListCommand::Run(const std::vector<std::string>& args) {
   }
 
   static std::map<std::string, std::pair<std::string, std::function<bool(const EventType&)>>>
-      type_map =
-  { {"hw", {"hardware events", [](const EventType& e) { return e.type == PERF_TYPE_HARDWARE; }}},
-    {"sw", {"software events", [](const EventType& e) { return e.type == PERF_TYPE_SOFTWARE; }}},
-    {"cache", {"hw-cache events", [](const EventType& e) { return e.type == PERF_TYPE_HW_CACHE; }}},
-    {"raw",
-     {"raw events provided by cpu pmu",
-      [](const EventType& e) { return e.type == PERF_TYPE_RAW; }}},
-    {"tracepoint",
-     {"tracepoint events", [](const EventType& e) { return e.type == PERF_TYPE_TRACEPOINT; }}},
+      type_map = {
+          {"hw",
+           {"hardware events", [](const EventType& e) { return e.type == PERF_TYPE_HARDWARE; }}},
+          {"sw",
+           {"software events", [](const EventType& e) { return e.type == PERF_TYPE_SOFTWARE; }}},
+          {"cache",
+           {"hw-cache events", [](const EventType& e) { return e.type == PERF_TYPE_HW_CACHE; }}},
+          {"raw",
+           {"raw events provided by cpu pmu",
+            [](const EventType& e) { return e.type == PERF_TYPE_RAW; }}},
+          {"tracepoint",
+           {"tracepoint events",
+            [](const EventType& e) { return e.type == PERF_TYPE_TRACEPOINT; }}},
 #if defined(__arm__) || defined(__aarch64__)
-    {"cs-etm",
-     {"coresight etm events",
-      [](const EventType& e) { return e.type == ETMRecorder::GetInstance().GetEtmEventType(); }}},
+          {"cs-etm",
+           {"coresight etm events",
+            [](const EventType& e) {
+              return e.type == ETMRecorder::GetInstance().GetEtmEventType();
+            }}},
 #endif
-    {"pmu", {"pmu events", [](const EventType& e) { return e.IsPmuEvent(); }}},
-  };
+          {"pmu", {"pmu events", [](const EventType& e) { return e.IsPmuEvent(); }}},
+      };
 
   std::vector<std::string> names;
   if (args.empty()) {
@@ -192,9 +200,11 @@ bool ListCommand::Run(const std::vector<std::string>& args) {
     }
   }
 
+  auto& event_types = GetAllEventTypes();
+
   for (auto& name : names) {
     auto it = type_map.find(name);
-    PrintEventTypesOfType(name, it->second.first, it->second.second);
+    PrintEventTypesOfType(name, it->second.first, it->second.second, event_types);
   }
   return true;
 }
@@ -216,5 +226,3 @@ void ListCommand::ShowFeatures() {
 void RegisterListCommand() {
   RegisterCommand("list", [] { return std::unique_ptr<Command>(new ListCommand); });
 }
-
-}  // namespace simpleperf

@@ -1,4 +1,4 @@
-#!/usr/bin/env python3
+#!/usr/bin/env python
 #
 # Copyright (C) 2016 The Android Open Source Project
 #
@@ -49,7 +49,7 @@ INSTALL_LIST = [
                  'simpleperf/android/x86/simpleperf_ndk',
                  'android/x86/simpleperf'),
 
-    # simpleperf on host.
+    # simpleperf on host. Linux and macOS are 64-bit only these days.
     InstallEntry('MODULES-IN-system-extras-simpleperf',
                  'simpleperf/linux/x86_64/simpleperf_ndk64',
                  'linux/x86_64/simpleperf', True),
@@ -59,6 +59,9 @@ INSTALL_LIST = [
     InstallEntry('MODULES-IN-system-extras-simpleperf',
                  'simpleperf/windows/x86_64/simpleperf_ndk64.exe',
                  'windows/x86_64/simpleperf.exe', True),
+    InstallEntry('MODULES-IN-system-extras-simpleperf',
+                 'simpleperf/windows/x86/simpleperf_ndk.exe',
+                 'windows/x86/simpleperf.exe', True),
 
     # libsimpleperf_report.so on host
     InstallEntry('MODULES-IN-system-extras-simpleperf',
@@ -70,10 +73,17 @@ INSTALL_LIST = [
     InstallEntry('MODULES-IN-system-extras-simpleperf',
                  'simpleperf/windows/x86_64/libsimpleperf_report.dll',
                  'windows/x86_64/libsimpleperf_report.dll', True),
+    InstallEntry('MODULES-IN-system-extras-simpleperf',
+                 'simpleperf/windows/x86/libsimpleperf_report.dll',
+                 'windows/x86/libsimpleperf_report.dll', True),
 
     # libwinpthread-1.dll on windows host
     InstallEntry(MINGW + '/bin/libwinpthread-1.dll', 'libwinpthread-1.dll',
                  'windows/x86_64/libwinpthread-1.dll', False),
+    InstallEntry(MINGW + '/lib32/libwinpthread-1.dll',
+                 'libwinpthread-1_32.dll',
+                 'windows/x86/libwinpthread-1.dll',
+                 False),
 ]
 
 

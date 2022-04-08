@@ -18,31 +18,20 @@
 #define SIMPLE_PERF_UTILS_H_
 
 #include <stddef.h>
-#include <stdio.h>
 #include <time.h>
 
-#include <fstream>
 #include <functional>
-#include <optional>
 #include <set>
 #include <string>
 #include <vector>
 
 #include <android-base/logging.h>
 #include <android-base/macros.h>
-#include <android-base/parseint.h>
-#include <android-base/strings.h>
 #include <android-base/unique_fd.h>
 #include <ziparchive/zip_archive.h>
 
-namespace simpleperf {
-
-static inline uint64_t AlignDown(uint64_t value, uint64_t alignment) {
-  return value & ~(alignment - 1);
-}
-
 static inline uint64_t Align(uint64_t value, uint64_t alignment) {
-  return AlignDown(value + alignment - 1, alignment);
+  return (value + alignment - 1) & ~(alignment - 1);
 }
 
 #ifdef _WIN32
@@ -58,9 +47,12 @@ static inline uint64_t Align(uint64_t value, uint64_t alignment) {
 class OneTimeFreeAllocator {
  public:
   explicit OneTimeFreeAllocator(size_t unit_size = 8192u)
-      : unit_size_(unit_size), cur_(nullptr), end_(nullptr) {}
+      : unit_size_(unit_size), cur_(nullptr), end_(nullptr) {
+  }
 
-  ~OneTimeFreeAllocator() { Clear(); }
+  ~OneTimeFreeAllocator() {
+    Clear();
+  }
 
   void Clear();
   const char* AllocateString(std::string_view s);
@@ -70,19 +62,6 @@ class OneTimeFreeAllocator {
   std::vector<char*> v_;
   char* cur_;
   char* end_;
-};
-
-class LineReader {
- public:
-  explicit LineReader(std::string_view file_path) : ifs_(file_path) {}
-  // Return true if open file successfully.
-  bool Ok() const { return ifs_.good(); }
-  // If available, return next line content with new line, otherwise return nullptr.
-  std::string* ReadLine() { return (std::getline(ifs_, buf_)) ? &buf_ : nullptr; }
-
- private:
-  std::ifstream ifs_;
-  std::string buf_;
 };
 
 class FileHelper {
@@ -167,6 +146,16 @@ std::string GetLogSeverityName();
 
 bool IsRoot();
 
+struct KernelSymbol {
+  uint64_t addr;
+  char type;
+  const char* name;
+  const char* module;  // If nullptr, the symbol is not in a kernel module.
+};
+
+bool ProcessKernelSymbols(std::string& symbol_data,
+                          const std::function<bool(const KernelSymbol&)>& callback);
+
 size_t GetPageSize();
 
 uint64_t ConvertBytesToValue(const char* bytes, uint32_t size);
@@ -175,29 +164,16 @@ timeval SecondToTimeval(double time_in_sec);
 
 std::string GetSimpleperfVersion();
 
-std::optional<std::set<int>> GetCpusFromString(const std::string& s);
-std::optional<std::set<pid_t>> GetTidsFromString(const std::string& s, bool check_if_exists);
+std::vector<int> GetCpusFromString(const std::string& s);
 
-template <typename T>
-std::optional<std::set<T>> ParseUintVector(const std::string& s) {
-  std::set<T> result;
-  T value;
-  for (const auto& p : android::base::Split(s, ",")) {
-    if (!android::base::ParseUint(p.c_str(), &value, std::numeric_limits<T>::max())) {
-      LOG(ERROR) << "Invalid Uint '" << p << "' in " << s;
-      return std::nullopt;
-    }
-    result.insert(value);
-  }
-  return result;
-}
+namespace {
 
 // from boost::hash_combine
 template <typename T>
-static inline void HashCombine(size_t& seed, const T& val) {
+void HashCombine(size_t& seed, const T& val) {
   seed ^= std::hash<T>()(val) + 0x9e3779b9 + (seed << 6) + (seed >> 2);
 }
 
-}  // namespace simpleperf
+}  // namespace
 
 #endif  // SIMPLE_PERF_UTILS_H_

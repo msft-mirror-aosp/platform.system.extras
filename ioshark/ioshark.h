@@ -14,8 +14,6 @@
  * limitations under the License.
  */
 
-#pragma once
-
 /*
  * Format of the parsed workload files.
  * 1) Header

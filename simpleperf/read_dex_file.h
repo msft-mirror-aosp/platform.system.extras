@@ -26,21 +26,21 @@
 #include <art_api/dex_file_support.h>
 #endif
 
-namespace simpleperf {
-
+#ifndef NO_LIBDEXFILE_SUPPORT
+typedef art_api::dex::MethodInfo DexFileSymbol;
+#else
 struct DexFileSymbol {
-  std::string_view name;
-  uint64_t addr;
-  uint64_t size;
+  uint64_t offset;
+  uint64_t len;
+  std::string name;
 };
+#endif
 
 bool ReadSymbolsFromDexFileInMemory(void* addr, uint64_t size,
                                     const std::vector<uint64_t>& dex_file_offsets,
-                                    const std::function<void(DexFileSymbol*)>& symbol_callback);
+                                    std::vector<DexFileSymbol>* symbols);
 bool ReadSymbolsFromDexFile(const std::string& file_path,
                             const std::vector<uint64_t>& dex_file_offsets,
-                            const std::function<void(DexFileSymbol*)>& symbol_callback);
-
-}  // namespace simpleperf
+                            std::vector<DexFileSymbol>* symbols);
 
 #endif  // SIMPLE_PERF_READ_DEX_FILE_H_

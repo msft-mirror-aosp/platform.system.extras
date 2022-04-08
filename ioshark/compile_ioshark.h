@@ -14,12 +14,6 @@
  * limitations under the License.
  */
 
-#include <stdio.h>
-#include <sys/types.h>
-#include <unistd.h>
-
-#include "ioshark.h"
-
 #define FILE_DB_HASHSIZE	8192
 
 struct files_db_s {

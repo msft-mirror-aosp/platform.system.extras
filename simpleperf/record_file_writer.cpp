@@ -18,8 +18,8 @@
 
 #include <fcntl.h>
 #include <string.h>
+#include <sys/mman.h>
 #include <unistd.h>
-
 #include <algorithm>
 #include <set>
 #include <string>
@@ -33,10 +33,7 @@
 #include "event_attr.h"
 #include "perf_event.h"
 #include "record.h"
-#include "system/extras/simpleperf/record_file.pb.h"
 #include "utils.h"
-
-namespace simpleperf {
 
 using namespace PerfFileFormat;
 
@@ -53,22 +50,22 @@ std::unique_ptr<RecordFileWriter> RecordFileWriter::CreateInstance(const std::st
     return nullptr;
   }
 
-  return std::unique_ptr<RecordFileWriter>(new RecordFileWriter(filename, fp, true));
+  return std::unique_ptr<RecordFileWriter>(new RecordFileWriter(filename, fp));
 }
 
-RecordFileWriter::RecordFileWriter(const std::string& filename, FILE* fp, bool own_fp)
+RecordFileWriter::RecordFileWriter(const std::string& filename, FILE* fp)
     : filename_(filename),
       record_fp_(fp),
-      own_fp_(own_fp),
       attr_section_offset_(0),
       attr_section_size_(0),
       data_section_offset_(0),
       data_section_size_(0),
       feature_section_offset_(0),
-      feature_count_(0) {}
+      feature_count_(0) {
+}
 
 RecordFileWriter::~RecordFileWriter() {
-  if (record_fp_ != nullptr && own_fp_) {
+  if (record_fp_ != nullptr) {
     fclose(record_fp_);
     unlink(filename_.c_str());
   }
@@ -319,88 +316,83 @@ bool RecordFileWriter::WriteAuxTraceFeature(const std::vector<uint64_t>& auxtrac
     data.push_back(offset);
     data.push_back(AuxTraceRecord::Size());
   }
-  return WriteFeature(FEAT_AUXTRACE, reinterpret_cast<char*>(data.data()),
-                      data.size() * sizeof(uint64_t));
+  return WriteFeatureBegin(FEAT_AUXTRACE) && Write(data.data(), data.size() * sizeof(uint64_t)) &&
+         WriteFeatureEnd(FEAT_AUXTRACE);
 }
 
-bool RecordFileWriter::WriteFileFeatures(const std::vector<Dso*>& dsos) {
-  for (Dso* dso : dsos) {
+bool RecordFileWriter::WriteFileFeatures(const std::vector<Dso*>& files) {
+  for (Dso* dso : files) {
     // Always want to dump dex file offsets for DSO_DEX_FILE type.
     if (!dso->HasDumpId() && dso->type() != DSO_DEX_FILE) {
       continue;
     }
-    FileFeature file;
-    file.path = dso->Path();
-    file.type = dso->type();
-    dso->GetMinExecutableVaddr(&file.min_vaddr, &file.file_offset_of_min_vaddr);
+    uint32_t dso_type = dso->type();
+    uint64_t min_vaddr;
+    uint64_t file_offset_of_min_vaddr;
+    dso->GetMinExecutableVaddr(&min_vaddr, &file_offset_of_min_vaddr);
 
     // Dumping all symbols in hit files takes too much space, so only dump
     // needed symbols.
     const std::vector<Symbol>& symbols = dso->GetSymbols();
+    std::vector<const Symbol*> dump_symbols;
     for (const auto& sym : symbols) {
       if (sym.HasDumpId()) {
-        file.symbol_ptrs.emplace_back(&sym);
+        dump_symbols.push_back(&sym);
       }
     }
-    std::sort(file.symbol_ptrs.begin(), file.symbol_ptrs.end(), Symbol::CompareByAddr);
+    std::sort(dump_symbols.begin(), dump_symbols.end(), Symbol::CompareByAddr);
 
-    if (const auto dex_file_offsets = dso->DexFileOffsets(); dex_file_offsets != nullptr) {
-      file.dex_file_offsets = *dex_file_offsets;
-    }
-    if (!WriteFileFeature(file)) {
+    const std::vector<uint64_t>* dex_file_offsets = dso->DexFileOffsets();
+    if (!WriteFileFeature(dso->Path(), dso_type, min_vaddr, file_offset_of_min_vaddr,
+                          dump_symbols, dex_file_offsets)) {
       return false;
     }
   }
   return true;
 }
 
-bool RecordFileWriter::WriteFileFeature(const FileFeature& file) {
-  uint32_t symbol_count = file.symbols.size() + file.symbol_ptrs.size();
-  uint32_t size = file.path.size() + 1 + sizeof(uint32_t) * 2 + sizeof(uint64_t) +
-                  symbol_count * (sizeof(uint64_t) + sizeof(uint32_t));
-  for (const auto& symbol : file.symbols) {
-    size += strlen(symbol.Name()) + 1;
-  }
-  for (const auto& symbol : file.symbol_ptrs) {
+bool RecordFileWriter::WriteFileFeature(const std::string& file_path,
+                                        uint32_t file_type,
+                                        uint64_t min_vaddr,
+                                        uint64_t file_offset_of_min_vaddr,
+                                        const std::vector<const Symbol*>& symbols,
+                                        const std::vector<uint64_t>* dex_file_offsets) {
+  uint32_t size = file_path.size() + 1 + sizeof(uint32_t) * 2 +
+      sizeof(uint64_t) + symbols.size() * (sizeof(uint64_t) + sizeof(uint32_t));
+  for (const auto& symbol : symbols) {
     size += strlen(symbol->Name()) + 1;
   }
-  if (file.type == DSO_DEX_FILE) {
-    size += sizeof(uint32_t) + sizeof(uint64_t) * file.dex_file_offsets.size();
+  if (dex_file_offsets != nullptr) {
+    size += sizeof(uint32_t) + sizeof(uint64_t) * dex_file_offsets->size();
   }
-  if (file.type == DSO_ELF_FILE || file.type == DSO_KERNEL_MODULE) {
+  if (file_type == DSO_ELF_FILE) {
     size += sizeof(uint64_t);
   }
   std::vector<char> buf(sizeof(uint32_t) + size);
   char* p = buf.data();
   MoveToBinaryFormat(size, p);
-  MoveToBinaryFormat(file.path.c_str(), file.path.size() + 1, p);
-  MoveToBinaryFormat(static_cast<uint32_t>(file.type), p);
-  MoveToBinaryFormat(file.min_vaddr, p);
+  MoveToBinaryFormat(file_path.c_str(), file_path.size() + 1, p);
+  MoveToBinaryFormat(file_type, p);
+  MoveToBinaryFormat(min_vaddr, p);
+  uint32_t symbol_count = static_cast<uint32_t>(symbols.size());
   MoveToBinaryFormat(symbol_count, p);
-
-  auto write_symbol = [&](const Symbol* symbol) {
+  for (const auto& symbol : symbols) {
     MoveToBinaryFormat(symbol->addr, p);
     uint32_t len = symbol->len;
     MoveToBinaryFormat(len, p);
     MoveToBinaryFormat(symbol->Name(), strlen(symbol->Name()) + 1, p);
-  };
-  for (const auto& symbol : file.symbols) {
-    write_symbol(&symbol);
   }
-  for (const auto& symbol : file.symbol_ptrs) {
-    write_symbol(symbol);
-  }
-  if (file.type == DSO_DEX_FILE) {
-    uint32_t offset_count = file.dex_file_offsets.size();
+  if (dex_file_offsets != nullptr) {
+    uint32_t offset_count = dex_file_offsets->size();
     MoveToBinaryFormat(offset_count, p);
-    MoveToBinaryFormat(file.dex_file_offsets.data(), offset_count, p);
+    MoveToBinaryFormat(dex_file_offsets->data(), offset_count, p);
   }
-  if (file.type == DSO_ELF_FILE || file.type == DSO_KERNEL_MODULE) {
-    MoveToBinaryFormat(file.file_offset_of_min_vaddr, p);
+  if (file_type == DSO_ELF_FILE) {
+    MoveToBinaryFormat(file_offset_of_min_vaddr, p);
   }
   CHECK_EQ(buf.size(), static_cast<size_t>(p - buf.data()));
 
-  return WriteFeature(FEAT_FILE, buf.data(), buf.size());
+  return WriteFeature(FEAT_FILE, buf);
 }
 
 bool RecordFileWriter::WriteMetaInfoFeature(
@@ -416,27 +408,11 @@ bool RecordFileWriter::WriteMetaInfoFeature(
     MoveToBinaryFormat(pair.first.c_str(), pair.first.size() + 1, p);
     MoveToBinaryFormat(pair.second.c_str(), pair.second.size() + 1, p);
   }
-  return WriteFeature(FEAT_META_INFO, buf.data(), buf.size());
+  return WriteFeature(FEAT_META_INFO, buf);
 }
 
-bool RecordFileWriter::WriteDebugUnwindFeature(const DebugUnwindFeature& debug_unwind) {
-  GOOGLE_PROTOBUF_VERIFY_VERSION;
-  proto::DebugUnwindFeature proto_debug_unwind;
-  for (auto& file : debug_unwind) {
-    auto proto_file = proto_debug_unwind.add_file();
-    proto_file->set_path(file.path);
-    proto_file->set_size(file.size);
-  }
-  std::string s;
-  if (!proto_debug_unwind.SerializeToString(&s)) {
-    LOG(ERROR) << "SerializeToString() failed";
-    return false;
-  }
-  return WriteFeature(FEAT_DEBUG_UNWIND, s.data(), s.size());
-}
-
-bool RecordFileWriter::WriteFeature(int feature, const char* data, size_t size) {
-  return WriteFeatureBegin(feature) && Write(data, size) && WriteFeatureEnd(feature);
+bool RecordFileWriter::WriteFeature(int feature, const std::vector<char>& data) {
+  return WriteFeatureBegin(feature) && Write(data.data(), data.size()) && WriteFeatureEnd(feature);
 }
 
 bool RecordFileWriter::WriteFeatureBegin(int feature) {
@@ -515,12 +491,10 @@ bool RecordFileWriter::Close() {
     result = false;
   }
 
-  if (own_fp_ && fclose(record_fp_) != 0) {
+  if (fclose(record_fp_) != 0) {
     PLOG(ERROR) << "failed to close record file '" << filename_ << "'";
     result = false;
   }
   record_fp_ = nullptr;
   return result;
 }
-
-}  // namespace simpleperf

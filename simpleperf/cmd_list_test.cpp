@@ -19,8 +19,6 @@
 #include "command.h"
 #include "test_util.h"
 
-using namespace simpleperf;
-
 class ListCommandTest : public ::testing::Test {
  protected:
   virtual void SetUp() {

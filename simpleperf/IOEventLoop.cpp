@@ -21,8 +21,6 @@
 
 #include <android-base/logging.h>
 
-namespace simpleperf {
-
 struct IOEvent {
   IOEventLoop* loop;
   event* e;
@@ -31,7 +29,8 @@ struct IOEvent {
   bool enabled;
 
   IOEvent(IOEventLoop* loop, const std::function<bool()>& callback)
-      : loop(loop), e(nullptr), timeout({}), callback(callback), enabled(false) {}
+      : loop(loop), e(nullptr), timeout({}), callback(callback), enabled(false) {
+  }
 
   ~IOEvent() {
     if (e != nullptr) {
@@ -110,25 +109,29 @@ static bool MakeFdNonBlocking(int fd) {
   return true;
 }
 
-IOEventRef IOEventLoop::AddReadEvent(int fd, const std::function<bool()>& callback) {
+IOEventRef IOEventLoop::AddReadEvent(int fd,
+                                     const std::function<bool()>& callback) {
   if (!MakeFdNonBlocking(fd)) {
     return nullptr;
   }
   return AddEvent(fd, EV_READ | EV_PERSIST, nullptr, callback);
 }
 
-IOEventRef IOEventLoop::AddWriteEvent(int fd, const std::function<bool()>& callback) {
+IOEventRef IOEventLoop::AddWriteEvent(int fd,
+                                      const std::function<bool()>& callback) {
   if (!MakeFdNonBlocking(fd)) {
     return nullptr;
   }
   return AddEvent(fd, EV_WRITE | EV_PERSIST, nullptr, callback);
 }
 
-bool IOEventLoop::AddSignalEvent(int sig, const std::function<bool()>& callback) {
+bool IOEventLoop::AddSignalEvent(int sig,
+                                 const std::function<bool()>& callback) {
   return AddEvent(sig, EV_SIGNAL | EV_PERSIST, nullptr, callback) != nullptr;
 }
 
-bool IOEventLoop::AddSignalEvents(std::vector<int> sigs, const std::function<bool()>& callback) {
+bool IOEventLoop::AddSignalEvents(std::vector<int> sigs,
+                                  const std::function<bool()>& callback) {
   for (auto sig : sigs) {
     if (!AddSignalEvent(sig, callback)) {
       return false;
@@ -201,8 +204,8 @@ bool IOEventLoop::DisableEvent(IOEventRef ref) {
 
 bool IOEventLoop::EnableEvent(IOEventRef ref) {
   if (!ref->enabled) {
-    timeval* timeout =
-        (ref->timeout.tv_sec != 0 || ref->timeout.tv_usec != 0) ? &ref->timeout : nullptr;
+    timeval* timeout = (ref->timeout.tv_sec != 0 || ref->timeout.tv_usec != 0) ?
+                        &ref->timeout : nullptr;
     if (event_add(ref->e, timeout) != 0) {
       LOG(ERROR) << "event_add() failed";
       return false;
@@ -223,5 +226,3 @@ bool IOEventLoop::DelEvent(IOEventRef ref) {
   }
   return true;
 }
-
-}  // namespace simpleperf

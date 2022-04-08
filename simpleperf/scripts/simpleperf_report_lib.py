@@ -1,4 +1,4 @@
-#!/usr/bin/env python3
+#!/usr/bin/env python
 #
 # Copyright (C) 2016 The Android Open Source Project
 #
@@ -22,28 +22,28 @@
 
 import collections
 import ctypes as ct
-from pathlib import Path
 import struct
-from typing import Any, Dict, List, Optional, Union
-
-from simpleperf_utils import bytes_to_str, get_host_binary_path, is_windows, str_to_bytes
+from utils import bytes_to_str, get_host_binary_path, is_windows, str_to_bytes
 
 
-def _is_null(p: Optional[ct._Pointer]) -> bool:
+def _get_native_lib():
+    return get_host_binary_path('libsimpleperf_report.so')
+
+
+def _is_null(p):
     if p:
         return False
     return ct.cast(p, ct.c_void_p).value is None
 
 
-def _char_pt(s: str) -> bytes:
+def _char_pt(s):
     return str_to_bytes(s)
 
 
-def _char_pt_to_str(char_pt: ct.c_char_p) -> str:
+def _char_pt_to_str(char_pt):
     return bytes_to_str(char_pt)
 
-
-def _check(cond: bool, failmsg: str):
+def _check(cond, failmsg):
     if not cond:
         raise RuntimeError(failmsg)
 
@@ -72,7 +72,7 @@ class SampleStruct(ct.Structure):
                 ('period', ct.c_uint64)]
 
     @property
-    def thread_comm(self) -> str:
+    def thread_comm(self):
         return _char_pt_to_str(self._thread_comm)
 
 
@@ -83,41 +83,31 @@ class TracingFieldFormatStruct(ct.Structure):
        elem_size: size of the element type.
        elem_count: the number of elements in this field, more than one if the field is an array.
        is_signed: whether the element type is signed or unsigned.
-       is_dynamic: whether the element is a dynamic string.
     """
     _fields_ = [('_name', ct.c_char_p),
                 ('offset', ct.c_uint32),
                 ('elem_size', ct.c_uint32),
                 ('elem_count', ct.c_uint32),
-                ('is_signed', ct.c_uint32),
-                ('is_dynamic', ct.c_uint32)]
+                ('is_signed', ct.c_uint32)]
 
     _unpack_key_dict = {1: 'b', 2: 'h', 4: 'i', 8: 'q'}
 
     @property
-    def name(self) -> str:
+    def name(self):
         return _char_pt_to_str(self._name)
 
-    def parse_value(self, data: ct.c_char_p) -> Union[str, bytes, List[bytes]]:
+    def parse_value(self, data):
         """ Parse value of a field in a tracepoint event.
             The return value depends on the type of the field, and can be an int value, a string,
             an array of int values, etc. If the type can't be parsed, return a byte array or an
             array of byte arrays.
         """
-        if self.is_dynamic:
-            offset, max_len = struct.unpack('<HH', data[self.offset:self.offset + 4])
-            length = 0
-            while length < max_len and bytes_to_str(data[offset + length]) != '\x00':
-                length += 1
-            return bytes_to_str(data[offset: offset + length])
-
-        if self.elem_count > 1 and self.elem_size == 1:
-            # Probably the field is a string.
-            # Don't use self.is_signed, which has different values on x86 and arm.
+        if self.elem_count > 1 and self.elem_size == 1 and self.is_signed == 0:
+            # The field is a string.
             length = 0
             while length < self.elem_count and bytes_to_str(data[self.offset + length]) != '\x00':
                 length += 1
-            return bytes_to_str(data[self.offset: self.offset + length])
+            return bytes_to_str(data[self.offset : self.offset + length])
         unpack_key = self._unpack_key_dict.get(self.elem_size)
         if unpack_key:
             if not self.is_signed:
@@ -129,7 +119,7 @@ class TracingFieldFormatStruct(ct.Structure):
             value = []
             offset = self.offset
             for _ in range(self.elem_count):
-                value.append(data[offset: offset + self.elem_size])
+                value.append(data[offset : offset + self.elem_size])
                 offset += self.elem_size
         if self.elem_count == 1:
             value = value[0]
@@ -157,7 +147,7 @@ class EventStruct(ct.Structure):
                 ('tracing_data_format', TracingDataFormatStruct)]
 
     @property
-    def name(self) -> str:
+    def name(self):
         return _char_pt_to_str(self._name)
 
 
@@ -189,11 +179,11 @@ class SymbolStruct(ct.Structure):
                 ('mapping', ct.POINTER(MappingStruct))]
 
     @property
-    def dso_name(self) -> str:
+    def dso_name(self):
         return _char_pt_to_str(self._dso_name)
 
     @property
-    def symbol_name(self) -> str:
+    def symbol_name(self):
         return _char_pt_to_str(self._symbol_name)
 
 
@@ -235,9 +225,9 @@ class ReportLibStructure(ct.Structure):
 # pylint: disable=invalid-name
 class ReportLib(object):
 
-    def __init__(self, native_lib_path: Optional[str] = None):
+    def __init__(self, native_lib_path=None):
         if native_lib_path is None:
-            native_lib_path = self._get_native_lib()
+            native_lib_path = _get_native_lib()
 
         self._load_dependent_lib()
         self._lib = ct.CDLL(native_lib_path)
@@ -251,8 +241,6 @@ class ReportLib(object):
         self._ShowIpForUnknownSymbolFunc = self._lib.ShowIpForUnknownSymbol
         self._ShowArtFramesFunc = self._lib.ShowArtFrames
         self._MergeJavaMethodsFunc = self._lib.MergeJavaMethods
-        self._AddProguardMappingFileFunc = self._lib.AddProguardMappingFile
-        self._AddProguardMappingFileFunc.restype = ct.c_bool
         self._GetNextSampleFunc = self._lib.GetNextSample
         self._GetNextSampleFunc.restype = ct.POINTER(SampleStruct)
         self._GetEventOfCurrentSampleFunc = self._lib.GetEventOfCurrentSample
@@ -270,12 +258,9 @@ class ReportLib(object):
         self._instance = self._CreateReportLibFunc()
         assert not _is_null(self._instance)
 
-        self.meta_info: Optional[Dict[str, str]] = None
-        self.current_sample: Optional[SampleStruct] = None
-        self.record_cmd: Optional[str] = None
-
-    def _get_native_lib(self) -> str:
-        return get_host_binary_path('libsimpleperf_report.so')
+        self.meta_info = None
+        self.current_sample = None
+        self.record_cmd = None
 
     def _load_dependent_lib(self):
         # As the windows dll is built with mingw we need to load 'libwinpthread-1.dll'.
@@ -283,33 +268,34 @@ class ReportLib(object):
             self._libwinpthread = ct.CDLL(get_host_binary_path('libwinpthread-1.dll'))
 
     def Close(self):
-        if self._instance:
-            self._DestroyReportLibFunc(self._instance)
-            self._instance = None
+        if self._instance is None:
+            return
+        self._DestroyReportLibFunc(self._instance)
+        self._instance = None
 
-    def SetLogSeverity(self, log_level: str = 'info'):
+    def SetLogSeverity(self, log_level='info'):
         """ Set log severity of native lib, can be verbose,debug,info,error,fatal."""
-        cond: bool = self._SetLogSeverityFunc(self.getInstance(), _char_pt(log_level))
+        cond = self._SetLogSeverityFunc(self.getInstance(), _char_pt(log_level))
         _check(cond, 'Failed to set log level')
 
-    def SetSymfs(self, symfs_dir: str):
+    def SetSymfs(self, symfs_dir):
         """ Set directory used to find symbols."""
-        cond: bool = self._SetSymfsFunc(self.getInstance(), _char_pt(symfs_dir))
+        cond = self._SetSymfsFunc(self.getInstance(), _char_pt(symfs_dir))
         _check(cond, 'Failed to set symbols directory')
 
-    def SetRecordFile(self, record_file: str):
+    def SetRecordFile(self, record_file):
         """ Set the path of record file, like perf.data."""
-        cond: bool = self._SetRecordFileFunc(self.getInstance(), _char_pt(record_file))
+        cond = self._SetRecordFileFunc(self.getInstance(), _char_pt(record_file))
         _check(cond, 'Failed to set record file')
 
     def ShowIpForUnknownSymbol(self):
         self._ShowIpForUnknownSymbolFunc(self.getInstance())
 
-    def ShowArtFrames(self, show: bool = True):
+    def ShowArtFrames(self, show=True):
         """ Show frames of internal methods of the Java interpreter. """
         self._ShowArtFramesFunc(self.getInstance(), show)
 
-    def MergeJavaMethods(self, merge: bool = True):
+    def MergeJavaMethods(self, merge=True):
         """ This option merges jitted java methods with the same name but in different jit
             symfiles. If possible, it also merges jitted methods with interpreted methods,
             by mapping jitted methods to their corresponding dex files.
@@ -320,18 +306,12 @@ class ReportLib(object):
         """
         self._MergeJavaMethodsFunc(self.getInstance(), merge)
 
-    def AddProguardMappingFile(self, mapping_file: Union[str, Path]):
-        """ Add proguard mapping.txt to de-obfuscate method names. """
-        if not self._AddProguardMappingFileFunc(self.getInstance(), _char_pt(str(mapping_file))):
-            raise ValueError(f'failed to add proguard mapping file: {mapping_file}')
-
-    def SetKallsymsFile(self, kallsym_file: str):
+    def SetKallsymsFile(self, kallsym_file):
         """ Set the file path to a copy of the /proc/kallsyms file (for off device decoding) """
-        cond: bool = self._SetKallsymsFileFunc(self.getInstance(), _char_pt(kallsym_file))
+        cond = self._SetKallsymsFileFunc(self.getInstance(), _char_pt(kallsym_file))
         _check(cond, 'Failed to set kallsyms file')
 
-    def GetNextSample(self) -> Optional[SampleStruct]:
-        """ Return the next sample. If no more samples, return None. """
+    def GetNextSample(self):
         psample = self._GetNextSampleFunc(self.getInstance())
         if _is_null(psample):
             self.current_sample = None
@@ -339,25 +319,25 @@ class ReportLib(object):
             self.current_sample = psample[0]
         return self.current_sample
 
-    def GetCurrentSample(self) -> Optional[SampleStruct]:
+    def GetCurrentSample(self):
         return self.current_sample
 
-    def GetEventOfCurrentSample(self) -> EventStruct:
+    def GetEventOfCurrentSample(self):
         event = self._GetEventOfCurrentSampleFunc(self.getInstance())
         assert not _is_null(event)
         return event[0]
 
-    def GetSymbolOfCurrentSample(self) -> SymbolStruct:
+    def GetSymbolOfCurrentSample(self):
         symbol = self._GetSymbolOfCurrentSampleFunc(self.getInstance())
         assert not _is_null(symbol)
         return symbol[0]
 
-    def GetCallChainOfCurrentSample(self) -> CallChainStructure:
+    def GetCallChainOfCurrentSample(self):
         callchain = self._GetCallChainOfCurrentSampleFunc(self.getInstance())
         assert not _is_null(callchain)
         return callchain[0]
 
-    def GetTracingDataOfCurrentSample(self) -> Optional[Dict[str, Any]]:
+    def GetTracingDataOfCurrentSample(self):
         data = self._GetTracingDataOfCurrentSampleFunc(self.getInstance())
         if _is_null(data):
             return None
@@ -368,12 +348,12 @@ class ReportLib(object):
             result[field.name] = field.parse_value(data)
         return result
 
-    def GetBuildIdForPath(self, path: str) -> str:
+    def GetBuildIdForPath(self, path):
         build_id = self._GetBuildIdForPathFunc(self.getInstance(), _char_pt(path))
         assert not _is_null(build_id)
         return _char_pt_to_str(build_id)
 
-    def GetRecordCmd(self) -> str:
+    def GetRecordCmd(self):
         if self.record_cmd is not None:
             return self.record_cmd
         self.record_cmd = ''
@@ -399,7 +379,7 @@ class ReportLib(object):
             self.record_cmd = ' '.join(args)
         return self.record_cmd
 
-    def _GetFeatureString(self, feature_name: str) -> str:
+    def _GetFeatureString(self, feature_name):
         feature_data = self._GetFeatureSection(self.getInstance(), _char_pt(feature_name))
         result = ''
         if not _is_null(feature_data):
@@ -414,10 +394,10 @@ class ReportLib(object):
                 result += c
         return result
 
-    def GetArch(self) -> str:
+    def GetArch(self):
         return self._GetFeatureString('arch')
 
-    def MetaInfo(self) -> Dict[str, str]:
+    def MetaInfo(self):
         """ Return a string to string map stored in meta_info section in perf.data.
             It is used to pass some short meta information.
         """
@@ -440,7 +420,7 @@ class ReportLib(object):
                     self.meta_info[str_list[i]] = str_list[i + 1]
         return self.meta_info
 
-    def getInstance(self) -> ct._Pointer:
+    def getInstance(self):
         if self._instance is None:
             raise Exception('Instance is Closed')
         return self._instance
