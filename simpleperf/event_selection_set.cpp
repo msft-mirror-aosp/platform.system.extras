@@ -217,7 +217,8 @@ bool EventSelectionSet::BuildAndCheckEventSelection(const std::string& event_nam
   selection->event_attr.precise_ip = event_type->precise_ip;
   if (IsEtmEventType(event_type->event_type.type)) {
     auto& etm_recorder = ETMRecorder::GetInstance();
-    if (!etm_recorder.CheckEtmSupport()) {
+    if (auto result = etm_recorder.CheckEtmSupport(); !result.ok()) {
+      LOG(ERROR) << result.error();
       return false;
     }
     ETMRecorder::GetInstance().SetEtmPerfEventAttr(&selection->event_attr);
@@ -839,14 +840,7 @@ bool EventSelectionSet::ReadMmapEventData(bool with_time_limit) {
 }
 
 bool EventSelectionSet::FinishReadMmapEventData() {
-  // Stop the read thread, so we don't get more records beyond current time.
-  if (!SyncKernelBuffer() || !record_read_thread_->StopReadThread()) {
-    return false;
-  }
-  if (!ReadMmapEventData(false)) {
-    return false;
-  }
-  return true;
+  return ReadMmapEventData(false);
 }
 
 void EventSelectionSet::CloseEventFiles() {
