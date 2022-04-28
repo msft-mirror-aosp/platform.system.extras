@@ -131,6 +131,9 @@ cc_defaults {
         linux_glibc_x86_64: {
             stl: "libc++_static",
         },
+        linux_musl_x86_64: {
+            stl: "libc++_static",
+        },
         windows: {
             enabled: true,
             stl: "libc++_static",
@@ -328,7 +331,10 @@ cc_library {
     srcs: ["profcollect.cpp"],
     host_supported: false,
     static_libs: ["libsimpleperf"],
-    shared_libs: ["libLLVM_android"],
+    shared_libs: [
+        "libLLVM_android",
+        "libpower",
+    ],
 }
 
 rust_bindgen {
@@ -431,6 +437,16 @@ cc_binary {
                 dir: "simpleperf/linux/x86_64",
             },
         },
+        linux_musl_x86: {
+            dist: {
+                dir: "simpleperf/linux_musl/x86",
+            },
+        },
+        linux_musl_x86_64: {
+            dist: {
+                dir: "simpleperf/linux_musl/x86_64",
+            },
+        },
         windows_x86: {
             dist: {
                 dir: "simpleperf/windows/x86",
@@ -515,6 +531,16 @@ cc_library_shared {
                 dir: "simpleperf/linux/x86_64",
             },
         },
+        linux_musl_x86: {
+            dist: {
+                dir: "simpleperf/linux_musl/x86",
+            },
+        },
+        linux_musl_x86_64: {
+            dist: {
+                dir: "simpleperf/linux_musl/x86_64",
+            },
+        },
         windows_x86: {
             dist: {
                 dir: "simpleperf/windows/x86",
@@ -530,6 +556,11 @@ cc_library_shared {
 
 cc_defaults {
     name: "simpleperf_test_srcs",
+    tidy_timeout_srcs: [
+        "record_test.cpp",
+        "cmd_report_sample_test.cpp",
+        "cmd_report_test.cpp",
+    ],
     srcs: [
         "cmd_inject_test.cpp",
         "cmd_kmem_test.cpp",
@@ -561,6 +592,10 @@ cc_defaults {
             ],
         },
         linux: {
+            tidy_timeout_srcs: [
+                "cmd_stat_test.cpp",
+                "cmd_record_test.cpp",
+            ],
             srcs: [
                 "CallChainJoiner_test.cpp",
                 "cmd_api_test.cpp",
