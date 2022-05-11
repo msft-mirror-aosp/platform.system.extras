@@ -18,16 +18,20 @@
 
 use anyhow::{anyhow, Result};
 use chrono::Utc;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use crate::simpleperf_etm_trace_provider::SimpleperfEtmTraceProvider;
 
+#[cfg(feature = "test")]
+use crate::logging_trace_provider::LoggingTraceProvider;
+
 pub trait TraceProvider {
     fn get_name(&self) -> &'static str;
+    fn is_ready(&self) -> bool;
     fn trace(&self, trace_dir: &Path, tag: &str, sampling_period: &Duration);
-    fn process(&self, trace_dir: &Path, profile_dir: &Path) -> Result<()>;
+    fn process(&self, trace_dir: &Path, profile_dir: &Path, binary_filter: &str) -> Result<()>;
 }
 
 pub fn get_trace_provider() -> Result<Arc<Mutex<dyn TraceProvider + Send>>> {
@@ -36,9 +40,19 @@ pub fn get_trace_provider() -> Result<Arc<Mutex<dyn TraceProvider + Send>>> {
         return Ok(Arc::new(Mutex::new(SimpleperfEtmTraceProvider {})));
     }
 
+    #[cfg(feature = "test")]
+    if LoggingTraceProvider::supported() {
+        log::info!("logging trace provider registered.");
+        return Ok(Arc::new(Mutex::new(LoggingTraceProvider {})));
+    }
+
     Err(anyhow!("No trace provider found for this device."))
 }
 
-pub fn construct_file_name(tag: &str) -> String {
-    format!("{}_{}", Utc::now().format("%Y%m%d-%H%M%S"), tag)
+pub fn get_path(dir: &Path, tag: &str, ext: &str) -> Box<Path> {
+    let filename = format!("{}_{}", Utc::now().format("%Y%m%d-%H%M%S"), tag);
+    let mut trace_file = PathBuf::from(dir);
+    trace_file.push(filename);
+    trace_file.set_extension(ext);
+    trace_file.into_boxed_path()
 }
