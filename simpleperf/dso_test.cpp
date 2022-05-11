@@ -152,28 +152,24 @@ TEST(DebugElfFileFinder, build_id_mismatch) {
 TEST(dso, dex_file_dso) {
 #if defined(__linux__)
   for (DsoType dso_type : {DSO_DEX_FILE, DSO_ELF_FILE}) {
-    for (const DexFileTestData& entry : dex_file_test_data) {
-      if (entry.filename == "base_with_cdex_v1.vdex") {
-        continue;  // TODO: reenable it.
-      }
-      std::unique_ptr<Dso> dso = Dso::CreateDso(dso_type, GetTestData(entry.filename));
-      ASSERT_TRUE(dso);
-      dso->AddDexFileOffset(entry.dexfile_offset);
-      ASSERT_EQ(DSO_DEX_FILE, dso->type());
-      const Symbol* symbol = dso->FindSymbol(entry.symbol_addr);
-      ASSERT_NE(symbol, nullptr);
-      ASSERT_EQ(symbol->addr, entry.symbol_addr);
-      ASSERT_EQ(symbol->len, entry.symbol_len);
-      ASSERT_STREQ(symbol->DemangledName(), entry.symbol_name.c_str());
-      uint64_t min_vaddr;
-      uint64_t file_offset_of_min_vaddr;
-      dso->GetMinExecutableVaddr(&min_vaddr, &file_offset_of_min_vaddr);
-      ASSERT_EQ(min_vaddr, 0);
-      ASSERT_EQ(file_offset_of_min_vaddr, 0);
-    }
+    std::unique_ptr<Dso> dso = Dso::CreateDso(dso_type, GetTestData("base.vdex"));
+    ASSERT_TRUE(dso);
+    dso->AddDexFileOffset(0x28);
+    ASSERT_EQ(DSO_DEX_FILE, dso->type());
+    const Symbol* symbol = dso->FindSymbol(0x6c77e);
+    ASSERT_NE(symbol, nullptr);
+    ASSERT_EQ(symbol->addr, static_cast<uint64_t>(0x6c77e));
+    ASSERT_EQ(symbol->len, static_cast<uint64_t>(0x16));
+    ASSERT_STREQ(symbol->DemangledName(),
+                 "com.example.simpleperf.simpleperfexamplewithnative.MixActivity$1.run");
+    uint64_t min_vaddr;
+    uint64_t file_offset_of_min_vaddr;
+    dso->GetMinExecutableVaddr(&min_vaddr, &file_offset_of_min_vaddr);
+    ASSERT_EQ(min_vaddr, 0);
+    ASSERT_EQ(file_offset_of_min_vaddr, 0);
 
     // Don't crash on not exist zip entry.
-    std::unique_ptr<Dso> dso = Dso::CreateDso(dso_type, GetTestData("base.zip!/not_exist_entry"));
+    dso = Dso::CreateDso(dso_type, GetTestData("base.zip!/not_exist_entry"));
     ASSERT_TRUE(dso);
     ASSERT_EQ(nullptr, dso->FindSymbol(0));
   }
@@ -304,4 +300,25 @@ TEST(dso, symbol_map_file) {
   ASSERT_EQ(DSO_SYMBOL_MAP_FILE, dso->type());
   ASSERT_EQ(0x12345678, dso->IpToVaddrInFile(0x12345678, 0x0, 0x0));
   ASSERT_EQ(0x12345678, dso->IpToVaddrInFile(0x12345678, 0xe9201000, 0xa5000));
+}
+
+TEST(dso, FunctionName) {
+  Symbol symbol = Symbol("void ctep.v(cteo, ctgc, ctbn)", 0x0, 0x1);
+  ASSERT_EQ(symbol.FunctionName(), "ctep.v");
+  symbol = Symbol("ctep.v(cteo, ctgc, ctbn)", 0x0, 0x1);
+  ASSERT_EQ(symbol.FunctionName(), "ctep.v");
+  symbol = Symbol("ctep.v", 0x0, 0x1);
+  ASSERT_EQ(symbol.FunctionName(), "ctep.v");
+}
+
+TEST(dso, search_debug_file_only_when_needed) {
+  Dso::SetBuildIds({std::make_pair("/elf", BuildId("1b12a384a9f4a3f3659b7171ca615dbec3a81f71"))});
+  Dso::SetSymFsDir(GetTestDataDir());
+  CapturedStderr capture;
+  capture.Start();
+  auto dso = Dso::CreateDso(DSO_ELF_FILE, "/elf");
+  ASSERT_EQ(capture.str().find("build id mismatch"), std::string::npos);
+  ASSERT_EQ(dso->GetDebugFilePath(), "/elf");
+  ASSERT_NE(capture.str().find("build id mismatch"), std::string::npos);
+  capture.Stop();
 }
