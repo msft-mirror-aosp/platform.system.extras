@@ -21,21 +21,19 @@
     and pulls profiling data and related binaries on host.
 """
 
-import logging
+from __future__ import print_function
+import argparse
 import os
 import os.path
-import re
 import subprocess
 import sys
 import time
 
 from simpleperf_utils import (
-    AdbHelper, BaseArgumentParser, bytes_to_str, extant_dir, get_script_dir, get_target_binary_path,
-    log_exit, ReadElf, remove, str_to_bytes)
+    AdbHelper, bytes_to_str, extant_dir, get_script_dir, get_target_binary_path, log_debug,
+    log_info, log_exit, ReadElf, remove, set_log_level, str_to_bytes)
 
 NATIVE_LIBS_DIR_ON_DEVICE = '/data/local/tmp/native_libs/'
-
-SHELL_PS_UID_PATTERN = re.compile(r'USER.*\nu(\d+)_.*')
 
 
 class HostElfEntry(object):
@@ -203,14 +201,14 @@ class ProfilerBase(object):
         self.record_subproc = None
 
     def profile(self):
-        logging.info('prepare profiling')
+        log_info('prepare profiling')
         self.prepare()
-        logging.info('start profiling')
+        log_info('start profiling')
         self.start()
         self.wait_profiling()
-        logging.info('collect profiling data')
+        log_info('collect profiling data')
         self.collect_profiling_data()
-        logging.info('profiling is finished.')
+        log_info('profiling is finished.')
 
     def prepare(self):
         """Prepare recording. """
@@ -241,7 +239,7 @@ class ProfilerBase(object):
         args += ['--log', self.args.log]
         args += target_args
         adb_args = [self.adb.adb_path, 'shell'] + args
-        logging.info('run adb cmd: %s' % adb_args)
+        log_info('run adb cmd: %s' % adb_args)
         self.record_subproc = subprocess.Popen(adb_args)
 
     def wait_profiling(self):
@@ -255,7 +253,7 @@ class ProfilerBase(object):
             # Don't check return value of record_subproc. Because record_subproc also
             # receives Ctrl-C, and always returns non-zero.
             returncode = 0
-        logging.debug('profiling result [%s]' % (returncode == 0))
+        log_debug('profiling result [%s]' % (returncode == 0))
         if returncode != 0:
             log_exit('Failed to record profiling data.')
 
@@ -312,34 +310,15 @@ class AppProfiler(ProfilerBase):
                 pid = self.find_app_process()
                 if not pid:
                     break
-                count += 1
-                if count >= 5:
-                    logging.info('unable to kill %s, skipping...' % self.args.app)
-                    break
                 # When testing on Android N, `am force-stop` sometimes can't kill
                 # com.example.simpleperf.simpleperfexampleofkotlin. So use kill when this happens.
+                count += 1
                 if count >= 3:
                     self.run_in_app_dir(['kill', '-9', str(pid)])
 
     def find_app_process(self):
-        result, pidof_output = self.adb.run_and_return_output(
-            ['shell', 'pidof', self.args.app])
-        if not result:
-            return None
-        result, current_user = self.adb.run_and_return_output(
-            ['shell', 'am', 'get-current-user'])
-        if not result:
-            return None
-        pids = pidof_output.split()
-        for pid in pids:
-            result, ps_output = self.adb.run_and_return_output(
-                ['shell', 'ps', '-p', pid, '-o', 'USER'])
-            if not result:
-              return None
-            uid = SHELL_PS_UID_PATTERN.search(ps_output).group(1)
-            if uid == current_user.strip():
-              return int(pid)
-        return None
+        result, output = self.adb.run_and_return_output(['shell', 'pidof', self.args.app])
+        return int(output) if result else None
 
     def run_in_app_dir(self, args):
         if self.is_root_device:
@@ -378,7 +357,7 @@ class NativeProgramProfiler(ProfilerBase):
     """Profile a native program."""
 
     def start(self):
-        logging.info('Waiting for native process %s' % self.args.native_program)
+        log_info('Waiting for native process %s' % self.args.native_program)
         while True:
             (result, pid) = self.adb.run_and_return_output(['shell', 'pidof',
                                                             self.args.native_program])
@@ -419,7 +398,8 @@ class SystemWideProfiler(ProfilerBase):
 
 
 def main():
-    parser = BaseArgumentParser(description=__doc__)
+    parser = argparse.ArgumentParser(description=__doc__,
+                                     formatter_class=argparse.RawDescriptionHelpFormatter)
 
     target_group = parser.add_argument_group(title='Select profiling target'
                                              ).add_mutually_exclusive_group(required=True)
@@ -490,12 +470,15 @@ def main():
                              help="""Force adb to run in non root mode. By default, app_profiler.py
                                      will try to switch to root mode to be able to profile released
                                      Android apps.""")
+    other_group.add_argument(
+        '--log', choices=['debug', 'info', 'warning'], default='info', help='set log level')
 
     def check_args(args):
         if (not args.app) and (args.compile_java_code or args.activity or args.test):
             log_exit('--compile_java_code, -a, -t can only be used when profiling an Android app.')
 
     args = parser.parse_args()
+    set_log_level(args.log)
     check_args(args)
     if args.app:
         profiler = AppProfiler(args)
