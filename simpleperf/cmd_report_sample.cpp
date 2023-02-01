@@ -372,8 +372,7 @@ bool ReportSampleCommand::DumpProtobufReport(const std::string& filename) {
   // files[file_id] is the number of symbols in the file.
   std::vector<uint32_t> files;
   uint32_t max_message_size = 64 * (1 << 20);
-  uint32_t warning_message_size = 512 * (1 << 20);
-  coded_is.SetTotalBytesLimit(max_message_size, warning_message_size);
+  coded_is.SetTotalBytesLimit(max_message_size);
   while (true) {
     uint32_t size;
     if (!coded_is.ReadLittleEndian32(&size)) {
@@ -386,7 +385,7 @@ bool ReportSampleCommand::DumpProtobufReport(const std::string& filename) {
     // Handle files having large symbol table.
     if (size > max_message_size) {
       max_message_size = size;
-      coded_is.SetTotalBytesLimit(max_message_size, warning_message_size);
+      coded_is.SetTotalBytesLimit(max_message_size);
     }
     auto limit = coded_is.PushLimit(size);
     proto::Record proto_record;
@@ -516,7 +515,9 @@ bool ReportSampleCommand::OpenRecordFile() {
   if (record_file_reader_ == nullptr) {
     return false;
   }
-  record_file_reader_->LoadBuildIdAndFileFeatures(thread_tree_);
+  if (!record_file_reader_->LoadBuildIdAndFileFeatures(thread_tree_)) {
+    return false;
+  }
   auto& meta_info = record_file_reader_->GetMetaInfoFeature();
   if (auto it = meta_info.find("trace_offcpu"); it != meta_info.end()) {
     trace_offcpu_ = it->second == "true";
@@ -782,7 +783,7 @@ bool ReportSampleCommand::ProcessSwitchRecord(Record* r) {
 }
 
 bool ReportSampleCommand::WriteRecordInProtobuf(proto::Record& proto_record) {
-  coded_os_->WriteLittleEndian32(proto_record.ByteSize());
+  coded_os_->WriteLittleEndian32(static_cast<uint32_t>(proto_record.ByteSizeLong()));
   if (!proto_record.SerializeToCodedStream(coded_os_)) {
     LOG(ERROR) << "failed to write record to protobuf";
     return false;
