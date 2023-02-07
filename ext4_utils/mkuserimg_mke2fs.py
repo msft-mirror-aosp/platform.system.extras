@@ -197,10 +197,9 @@ def ConstructE2fsCommands(args):
   block_size = BLOCKSIZE
 
   target="TARGET_PRODUCT"
+  target_has_16k=False
   if target in os.environ and '_16k' in os.environ[target].lower():
     target_has_16k=True
-  else:
-    target_has_16k=False
 
   if 'data' in args.mount_point and target_has_16k:
     block_size = 16384
