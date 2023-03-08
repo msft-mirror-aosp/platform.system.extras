@@ -29,8 +29,8 @@
 
 namespace simpleperf {
 
-static constexpr size_t kDefaultLowBufferLevel = 10 * 1024 * 1024u;
-static constexpr size_t kDefaultCriticalBufferLevel = 5 * 1024 * 1024u;
+static constexpr size_t kDefaultLowBufferLevel = 10 * kMegabyte;
+static constexpr size_t kDefaultCriticalBufferLevel = 5 * kMegabyte;
 
 RecordBuffer::RecordBuffer(size_t buffer_size)
     : read_head_(0), write_head_(0), buffer_size_(buffer_size), buffer_(new char[buffer_size]) {}
@@ -236,6 +236,9 @@ RecordReadThread::RecordReadThread(size_t record_buffer_size, const perf_event_a
   }
   record_buffer_low_level_ = std::min(record_buffer_size / 4, kDefaultLowBufferLevel);
   record_buffer_critical_level_ = std::min(record_buffer_size / 6, kDefaultCriticalBufferLevel);
+  LOG(VERBOSE) << "user buffer size = " << record_buffer_size
+               << ", low_level size = " << record_buffer_low_level_
+               << ", critical_level size = " << record_buffer_critical_level_;
   if (!allow_cutting_samples) {
     record_buffer_low_level_ = record_buffer_critical_level_;
   }
