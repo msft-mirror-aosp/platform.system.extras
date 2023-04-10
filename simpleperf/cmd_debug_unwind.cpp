@@ -425,7 +425,7 @@ class TestFileGenerator : public RecordFileProcessor {
     }
     std::unordered_set<int> feature_types_to_copy = {
         PerfFileFormat::FEAT_ARCH, PerfFileFormat::FEAT_CMDLINE, PerfFileFormat::FEAT_META_INFO};
-    const size_t BUFFER_SIZE = 64 * 1024;
+    const size_t BUFFER_SIZE = 64 * kKilobyte;
     std::string buffer(BUFFER_SIZE, '\0');
     for (const auto& p : reader_->FeatureSectionDescriptors()) {
       auto feat_type = p.first;
@@ -447,12 +447,16 @@ class TestFileGenerator : public RecordFileProcessor {
         }
       } else if (feat_type == PerfFileFormat::FEAT_FILE ||
                  feat_type == PerfFileFormat::FEAT_FILE2) {
-        size_t read_pos = 0;
+        uint64_t read_pos = 0;
         FileFeature file_feature;
-        while (reader_->ReadFileFeature(read_pos, &file_feature)) {
+        bool error = false;
+        while (reader_->ReadFileFeature(read_pos, file_feature, error)) {
           if (kept_binaries_.count(file_feature.path) && !writer_->WriteFileFeature(file_feature)) {
             return false;
           }
+        }
+        if (error) {
+          return false;
         }
       } else if (feat_type == PerfFileFormat::FEAT_BUILD_ID) {
         std::vector<BuildIdRecord> build_ids = reader_->ReadBuildIdFeature();
