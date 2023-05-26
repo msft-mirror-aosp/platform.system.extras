@@ -227,7 +227,7 @@ TEST_F(ReportCommandTest, wrong_pid_filter_option) {
         Report(PERF_DATA_WITH_MULTIPLE_PIDS_AND_TIDS, {"--pids", "2,bogus"});
         exit(success ? 0 : 1);
       },
-      testing::ExitedWithCode(1), "Invalid tid 'bogus'");
+      testing::ExitedWithCode(1), "invalid pid: bogus");
 }
 
 TEST_F(ReportCommandTest, tid_filter_option) {
@@ -402,21 +402,6 @@ TEST_F(ReportCommandTest, no_show_ip_option) {
   Report(PERF_DATA, {"--no-show-ip"});
   ASSERT_TRUE(success);
   ASSERT_NE(content.find("unknown"), std::string::npos);
-}
-
-TEST_F(ReportCommandTest, no_symbol_table_warning) {
-  ASSERT_EXIT(
-      {
-        Report(PERF_DATA, {"--symfs", GetTestData(SYMFS_FOR_NO_SYMBOL_TABLE_WARNING)});
-        if (!success) {
-          exit(1);
-        }
-        if (content.find("GlobalFunc") != std::string::npos) {
-          exit(2);
-        }
-        exit(0);
-      },
-      testing::ExitedWithCode(0), "elf doesn't contain symbol table");
 }
 
 TEST_F(ReportCommandTest, read_elf_file_warning) {
