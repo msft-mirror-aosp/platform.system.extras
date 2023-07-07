@@ -662,8 +662,8 @@ bool ReportCommand::ParseOptions(const std::vector<std::string>& args) {
     return false;
   }
 
-  for (const OptionValue& value : options.PullValues("--pids")) {
-    if (auto pids = GetTidsFromString(*value.str_value, false); pids) {
+  if (auto strs = options.PullStringValues("--pids"); !strs.empty()) {
+    if (auto pids = GetPidsFromStrings(strs, false, false); pids) {
       record_filter_.AddPids(pids.value(), false);
     } else {
       return false;
@@ -856,9 +856,8 @@ bool ReportCommand::ReadMetaInfoFromRecordFile() {
 }
 
 bool ReportCommand::ReadEventAttrFromRecordFile() {
-  std::vector<EventAttrWithId> attrs = record_file_reader_->AttrSection();
-  for (const auto& attr_with_id : attrs) {
-    const perf_event_attr& attr = *attr_with_id.attr;
+  for (const EventAttrWithId& attr_with_id : record_file_reader_->AttrSection()) {
+    const perf_event_attr& attr = attr_with_id.attr;
     attr_names_.emplace_back(GetEventNameByAttr(attr));
 
     // There are no samples for events added by --add-counter. So skip them.
