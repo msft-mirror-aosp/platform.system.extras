@@ -108,6 +108,11 @@ struct FeatureSection {
   uint32_t data_size;
 };
 
+struct BuildIdPair {
+  const unsigned char* build_id;
+  const char* filename;
+};
+
 }  // extern "C"
 
 namespace simpleperf {
@@ -233,6 +238,7 @@ class ReportLib {
 
   const char* GetBuildIdForPath(const char* path);
   FeatureSection* GetFeatureSection(const char* feature_name);
+  BuildIdPair* GetAllBuildIds();
 
  private:
   std::unique_ptr<SampleRecord> GetNextSampleRecord();
@@ -271,6 +277,8 @@ class ReportLib {
   ThreadReportBuilder thread_report_builder_;
   std::unique_ptr<Tracing> tracing_;
   RecordFilter record_filter_;
+  std::vector<BuildIdRecord> buildid_records_;
+  std::vector<BuildIdPair> buildids_;
 };
 
 bool ReportLib::SetLogSeverity(const char* log_level) {
@@ -654,6 +662,24 @@ FeatureSection* ReportLib::GetFeatureSection(const char* feature_name) {
   return &feature_section_;
 }
 
+BuildIdPair* ReportLib::GetAllBuildIds() {
+  if (!OpenRecordFileIfNecessary()) {
+    return nullptr;
+  }
+  buildid_records_.clear();
+  buildid_records_ = record_file_reader_->ReadBuildIdFeature();
+  if (buildid_records_.empty()) {
+    return nullptr;
+  }
+  buildids_.clear();
+  buildids_.reserve(buildid_records_.size() + 1);
+  for (const auto& r : buildid_records_) {
+    buildids_.emplace_back(r.build_id.Data(), r.filename);
+  }
+  buildids_.emplace_back(nullptr, nullptr);
+  return buildids_.data();
+}
+
 }  // namespace simpleperf
 
 using ReportLib = simpleperf::ReportLib;
@@ -694,6 +720,7 @@ const char* GetProcessNameOfCurrentSample(ReportLib* report_lib) EXPORT;
 
 const char* GetBuildIdForPath(ReportLib* report_lib, const char* path) EXPORT;
 FeatureSection* GetFeatureSection(ReportLib* report_lib, const char* feature_name) EXPORT;
+BuildIdPair* GetAllBuildIds(ReportLib* report_lib) EXPORT;
 }
 
 // Exported methods working with a client created instance
@@ -792,4 +819,8 @@ const char* GetBuildIdForPath(ReportLib* report_lib, const char* path) {
 
 FeatureSection* GetFeatureSection(ReportLib* report_lib, const char* feature_name) {
   return report_lib->GetFeatureSection(feature_name);
+}
+
+BuildIdPair* GetAllBuildIds(ReportLib* report_lib) {
+  return report_lib->GetAllBuildIds();
 }

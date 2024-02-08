@@ -98,6 +98,11 @@ record without the USB cable connected.
 `binary_cache_builder.py` can either pull binaries from an Android device, or find binaries in
 directories on the host (via `-lib`).
 
+By default, `binary_cache_builder.py` only pulls binaries that are actually mentioned in samples.
+For `perf.data` files that are not sample based, like those containing ETM traces, the `--every`
+command-line paremeter can be used to pull every binary that was recorded with a build id in the
+`perf.data`.
+
 ```sh
 # Generate binary_cache for perf.data, by pulling binaries from the device.
 $ ./binary_cache_builder.py

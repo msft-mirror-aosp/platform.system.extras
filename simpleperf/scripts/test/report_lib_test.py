@@ -407,6 +407,18 @@ class TestReportLib(TestBase):
             process_name = self.report_lib.GetProcessNameOfCurrentSample()
             self.assertEqual(process_name, expected_process_name)
 
+    def test_all_build_ids(self):
+        """Test if it is possible to collect all binaries with build ids."""
+        record_file = TestHelper.testdata_path("runtest_two_functions_arm64_perf.data")
+        self.report_lib.SetRecordFile(record_file)
+        self.assertEqual(
+            self.report_lib.GetAllBuildIds(),
+            {'/apex/com.android.runtime/lib64/bionic/libc.so':
+             '0x43dd431c97ac668afc7e90ace442d58400000000',
+             '/data/local/tmp/simpleperf_runtest_two_functions_arm64':
+             '0xb4f1b49b0fe9e34e78fb14e5374c930c00000000'}
+        )
+
 
 class TestProtoFileReportLib(TestBase):
     def test_smoke(self):

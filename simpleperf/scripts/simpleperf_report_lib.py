@@ -258,6 +258,11 @@ class FeatureSectionStructure(ct.Structure):
                 ('data_size', ct.c_uint32)]
 
 
+class BuildIdPairStructure(ct.Structure):
+    _fields_ = [("build_id", ct.POINTER(ct.c_char)),
+                ("filename", ct.c_char_p)]
+
+
 class ReportLibStructure(ct.Structure):
     _fields_ = []
 
@@ -329,6 +334,8 @@ class ReportLib(object):
         self._GetBuildIdForPathFunc.restype = ct.c_char_p
         self._GetFeatureSection = self._lib.GetFeatureSection
         self._GetFeatureSection.restype = ct.POINTER(FeatureSectionStructure)
+        self._GetAllBuildIds = self._lib.GetAllBuildIds
+        self._GetAllBuildIds.restype = ct.POINTER(BuildIdPairStructure)
         self._instance = self._CreateReportLibFunc()
         assert not _is_null(self._instance)
 
@@ -581,6 +588,24 @@ class ReportLib(object):
         if self._instance is None:
             raise Exception('Instance is Closed')
         return self._instance
+
+    def GetAllBuildIds(self) -> Dict[str, str]:
+        """Return a dictionary mapping all filenames to their build ids.
+        """
+        ids = self._GetAllBuildIds(self.getInstance())
+        if not ids:
+            return {}
+
+        result = {}
+        i = 0
+        while ids[i].filename:
+            filename = _char_pt_to_str(ids[i].filename)
+            # A build_id is always 20 bytes long.
+            build_id = f"0x{ids[i].build_id[0:20].hex()}"
+            result[filename] = build_id
+            i += 1
+
+        return result
 
 
 ProtoSample = namedtuple('ProtoSample', ['ip', 'pid', 'tid',
