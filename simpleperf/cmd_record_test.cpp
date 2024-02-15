@@ -34,6 +34,7 @@
 #include <android-base/test_utils.h>
 
 #include "ETMRecorder.h"
+#include "JITDebugReader.h"
 #include "ProbeEvents.h"
 #include "cmd_record_impl.h"
 #include "command.h"
@@ -790,6 +791,7 @@ static void TestRecordingApps(const std::string& app_name, const std::string& ap
 }
 
 TEST(record_cmd, app_option_for_debuggable_app) {
+  OMIT_TEST_ON_NON_NATIVE_ABIS();
   TEST_REQUIRE_APPS();
   SetRunInAppToolForTesting(true, false);
   TestRecordingApps("com.android.simpleperf.debuggable", "debuggable");
@@ -798,6 +800,7 @@ TEST(record_cmd, app_option_for_debuggable_app) {
 }
 
 TEST(record_cmd, app_option_for_profileable_app) {
+  OMIT_TEST_ON_NON_NATIVE_ABIS();
   TEST_REQUIRE_APPS();
   SetRunInAppToolForTesting(false, true);
   TestRecordingApps("com.android.simpleperf.profileable", "profileable");
@@ -827,6 +830,7 @@ static void RecordJavaApp(RecordingAppHelper& helper) {
 
 TEST(record_cmd, record_java_app) {
 #if defined(__ANDROID__)
+  OMIT_TEST_ON_NON_NATIVE_ABIS();
   RecordingAppHelper helper;
 
   RecordJavaApp(helper);
@@ -892,6 +896,7 @@ TEST(record_cmd, record_native_app) {
 TEST(record_cmd, check_trampoline_after_art_jni_methods) {
   // Test if art jni methods are called by art_jni_trampoline.
 #if defined(__ANDROID__)
+  OMIT_TEST_ON_NON_NATIVE_ABIS();
   RecordingAppHelper helper;
 
   RecordJavaApp(helper);
@@ -903,6 +908,7 @@ TEST(record_cmd, check_trampoline_after_art_jni_methods) {
   auto reader = RecordFileReader::CreateInstance(helper.GetDataPath());
   ASSERT_TRUE(reader);
   ThreadTree thread_tree;
+  ASSERT_TRUE(reader->LoadBuildIdAndFileFeatures(thread_tree));
 
   auto get_symbol_name = [&](ThreadEntry* thread, uint64_t ip) -> std::string {
     const MapEntry* map = thread_tree.FindMap(thread, ip, false);
@@ -924,10 +930,23 @@ TEST(record_cmd, check_trampoline_after_art_jni_methods) {
         if (android::base::StartsWith(sym_name, "art::Method_invoke") && i + 1 < ips.size()) {
           has_check = true;
           std::string name = get_symbol_name(thread, ips[i + 1]);
-          if (!android::base::EndsWith(name, "jni_trampoline")) {
-            GTEST_LOG_(ERROR) << "unexpected symbol after art::Method_invoke: " << name;
-            return false;
+          if (android::base::EndsWith(name, "jni_trampoline")) {
+            continue;
           }
+          // When the jni_trampoline function is from JIT cache, we may not get map info in time.
+          // To avoid test flakiness, we accept this.
+          // Case 1: It doesn't hit any maps.
+          if (name == "unknown") {
+            continue;
+          }
+          // Case 2: It hits an old map for JIT cache.
+          if (const MapEntry* map = thread_tree.FindMap(thread, ips[i + 1], false);
+              JITDebugReader::IsPathInJITSymFile(map->dso->Path())) {
+            continue;
+          }
+
+          GTEST_LOG_(ERROR) << "unexpected symbol after art::Method_invoke: " << name;
+          return false;
         }
       }
     }
@@ -1068,6 +1087,31 @@ TEST(record_cmd, decode_etm_option) {
   ASSERT_TRUE(RunRecordCmd({"-e", "cs-etm", "--decode-etm", "--exclude-perf"}));
 }
 
+TEST(record_cmd, record_timestamp) {
+  if (!ETMRecorder::GetInstance().CheckEtmSupport().ok()) {
+    GTEST_LOG_(INFO) << "Omit this test since etm isn't supported on this device";
+    return;
+  }
+  ASSERT_TRUE(RunRecordCmd({"-e", "cs-etm", "--record-timestamp"}));
+}
+
+TEST(record_cmd, record_cycles) {
+  if (!ETMRecorder::GetInstance().CheckEtmSupport().ok()) {
+    GTEST_LOG_(INFO) << "Omit this test since etm isn't supported on this device";
+    return;
+  }
+  ASSERT_TRUE(RunRecordCmd({"-e", "cs-etm", "--record-cycles"}));
+}
+
+TEST(record_cmd, cycle_threshold) {
+  if (!ETMRecorder::GetInstance().CheckEtmSupport().ok()) {
+    GTEST_LOG_(INFO) << "Omit this test since etm isn't supported on this device";
+    return;
+  }
+  ASSERT_TRUE(RunRecordCmd({"-e", "cs-etm", "--record-cycles",
+                            "--cycle-threshold", "8"}));
+}
+
 TEST(record_cmd, binary_option) {
   if (!ETMRecorder::GetInstance().CheckEtmSupport().ok()) {
     GTEST_LOG_(INFO) << "Omit this test since etm isn't supported on this device";
@@ -1165,15 +1209,16 @@ TEST(record_cmd, ParseAddrFilterOption) {
 
 TEST(record_cmd, kprobe_option) {
   TEST_REQUIRE_ROOT();
-  ProbeEvents probe_events;
+  EventSelectionSet event_selection_set(false);
+  ProbeEvents probe_events(event_selection_set);
   if (!probe_events.IsKprobeSupported()) {
     GTEST_LOG_(INFO) << "Skip this test as kprobe isn't supported by the kernel.";
     return;
   }
-  ASSERT_TRUE(RunRecordCmd({"-e", "kprobes:myprobe", "--kprobe", "p:myprobe do_sys_open"}));
+  ASSERT_TRUE(RunRecordCmd({"-e", "kprobes:myprobe", "--kprobe", "p:myprobe do_sys_openat2"}));
   // A default kprobe event is created if not given an explicit --kprobe option.
-  ASSERT_TRUE(RunRecordCmd({"-e", "kprobes:do_sys_open"}));
-  ASSERT_TRUE(RunRecordCmd({"--group", "kprobes:do_sys_open"}));
+  ASSERT_TRUE(RunRecordCmd({"-e", "kprobes:do_sys_openat2"}));
+  ASSERT_TRUE(RunRecordCmd({"--group", "kprobes:do_sys_openat2"}));
 }
 
 TEST(record_cmd, record_filter_options) {
@@ -1299,4 +1344,10 @@ TEST(record_cmd, record_process_name) {
     return true;
   }));
   ASSERT_TRUE(has_comm);
+}
+
+TEST(record_cmd, delay_option) {
+  TemporaryFile tmpfile;
+  ASSERT_TRUE(RecordCmd()->Run(
+      {"-o", tmpfile.path, "-e", GetDefaultEvent(), "--delay", "100", "sleep", "1"}));
 }
