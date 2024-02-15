@@ -23,9 +23,10 @@
 import collections
 from collections import namedtuple
 import ctypes as ct
+import etm_types as etm
 from pathlib import Path
 import struct
-from typing import Any, Dict, List, Optional, Union
+from typing import Any, Callable, Dict, List, Optional, Tuple, Union
 
 from simpleperf_utils import (bytes_to_str, get_host_binary_path, is_windows, log_exit,
                               str_to_bytes, ReportLibOptions)
@@ -263,6 +264,17 @@ class BuildIdPairStructure(ct.Structure):
                 ("filename", ct.c_char_p)]
 
 
+class DsoAddress(ct.Structure):
+    _fields_ = [('path', ct.c_char_p),
+                ('offset', ct.c_uint64)]
+
+
+class Thread(ct.Structure):
+    _fields_ = [('pid', ct.c_int),
+                ('tid', ct.c_int),
+                ('comm', ct.c_char_p)]
+
+
 class ReportLibStructure(ct.Structure):
     _fields_ = []
 
@@ -336,12 +348,24 @@ class ReportLib(object):
         self._GetFeatureSection.restype = ct.POINTER(FeatureSectionStructure)
         self._GetAllBuildIds = self._lib.GetAllBuildIds
         self._GetAllBuildIds.restype = ct.POINTER(BuildIdPairStructure)
+        self._ETMCallbackType = ct.CFUNCTYPE(
+            None, ct.c_uint8, ct.POINTER(etm.GenericTraceElement))
+        self._SetETMCallback = self._lib.SetETMCallback
+        self._SetETMCallback.argtypes = [ct.POINTER(ReportLibStructure), self._ETMCallbackType]
+        self._ConvertETMAddressToVaddrInFile = self._lib.ConvertETMAddressToVaddrInFile
+        self._ConvertETMAddressToVaddrInFile.restype = DsoAddress
+        self._ConvertETMAddressToVaddrInFile.argtypes = [
+            ct.POINTER(ReportLibStructure), ct.c_uint8, ct.c_uint64]
+        self._GetThread = self._lib.GetThread
+        self._GetThread.restype = Thread
+        self._GetThread.argtypes = [ct.POINTER(ReportLibStructure), ct.c_int]
         self._instance = self._CreateReportLibFunc()
         assert not _is_null(self._instance)
 
         self.meta_info: Optional[Dict[str, str]] = None
         self.current_sample: Optional[SampleStruct] = None
         self.record_cmd: Optional[str] = None
+        self.callback: Optional[ct._FuncPointer] = None
 
     def _get_native_lib(self) -> str:
         return get_host_binary_path('libsimpleperf_report.so')
@@ -606,6 +630,40 @@ class ReportLib(object):
             i += 1
 
         return result
+
+    def SetETMCallback(self, callback: Callable[[int, etm.GenericTraceElement], None]) -> None:
+        """Set the callback to be called while decoding ETM traces. The callback will be called
+           for every element. The callback will receive the following parameters:
+           trace_id: CoreSight Trace ID that identifies the trace source.
+           elem: the decoded element as etm_types.GenericTraceElement.
+        """
+        def inner(trace_id, elem):
+            callback(trace_id, elem.contents)
+
+        # Save the callback, preventing GC from taking it.
+        self.callback = self._ETMCallbackType(inner)
+        self._SetETMCallback(self.getInstance(), self.callback)
+
+    def ConvertETMAddressToVaddrInFile(self, trace_id: int, addr: int) -> Optional[Tuple[str, int]]:
+        """Given the trace id and a virtual address in an ETM trace, return a tuple containing the
+           path to the DSO and the offset inside it. If the address is not mapped, return
+           None.
+        """
+        v = self._ConvertETMAddressToVaddrInFile(self.getInstance(), trace_id, addr)
+        if v.path:
+            path = _char_pt_to_str(v.path)
+            return (path, v.offset)
+        return None
+
+    def GetThread(self, tid: int) -> Optional[Tuple[int, int, str]]:
+        """Return a tuple containing PID, TID and comm for the given TID. If the thread is not found, return
+           None.
+        """
+        r = self._GetThread(self.getInstance(), tid)
+        if r.pid != -1:
+            return (r.pid, r.tid, _char_pt_to_str(r.comm))
+        else:
+            return None
 
 
 ProtoSample = namedtuple('ProtoSample', ['ip', 'pid', 'tid',
