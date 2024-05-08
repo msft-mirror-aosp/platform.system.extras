@@ -827,6 +827,16 @@ class Objdump(object):
         self.readelf = ReadElf(ndk_path)
         self.objdump_paths: Dict[str, str] = {}
 
+    def _objdump_path(self, arch):
+        objdump_path = self.objdump_paths.get(arch)
+        if not objdump_path:
+            objdump_path = ToolFinder.find_tool_path('llvm-objdump', self.ndk_path, arch)
+            if not objdump_path:
+                log_exit("Can't find llvm-objdump." + NDK_ERROR_MESSAGE)
+            self.objdump_paths[arch] = objdump_path
+
+        return objdump_path
+
     def get_dso_info(self, dso_path: str, expected_build_id: Optional[str]
                      ) -> Optional[Tuple[str, str]]:
         real_path = self.binary_finder.find_binary(dso_path, expected_build_id)
@@ -837,17 +847,35 @@ class Objdump(object):
             return None
         return (str(real_path), arch)
 
+    def disassemble_whole(self, dso_info) -> Dict[int, str]:
+        """Disassemble all code in a binary, returning a dictionary mapping
+           addresses to assembly output.
+        """
+        real_path, arch = dso_info
+        objdump_path = self._objdump_path(arch)
+
+        disassembly = {}
+        try:
+            raw_output = subprocess.check_output([objdump_path, '-d', '--demangle', real_path])
+            output = bytes_to_str(raw_output)
+            for line in output.split('\n'):
+                match = re.match(r'^\s*([0-9A-Fa-f]+):', line)
+                if not match:
+                    continue
+                addr = int(match.group(1), 16)
+                disassembly[addr] = line
+
+        except subprocess.CalledProcessError:
+            pass
+
+        return disassembly
+
     def disassemble_function(self, dso_info, addr_range: AddrRange) -> Optional[Disassembly]:
         """ Disassemble code for an addr range in a binary.
         """
         real_path, arch = dso_info
-        objdump_path = self.objdump_paths.get(arch)
-        if not objdump_path:
-            objdump_path = ToolFinder.find_tool_path('llvm-objdump', self.ndk_path, arch)
-            if not objdump_path:
-                log_exit("Can't find llvm-objdump." + NDK_ERROR_MESSAGE)
-            self.objdump_paths[arch] = objdump_path
 
+        objdump_path = self._objdump_path(arch)
         # Run objdump.
         args = [objdump_path, '-dlC', '--no-show-raw-insn',
                 '--start-address=0x%x' % addr_range.start,
@@ -884,12 +912,7 @@ class Objdump(object):
         if not sorted_addr_ranges:
             return []
         real_path, arch = dso_info
-        objdump_path = self.objdump_paths.get(arch)
-        if not objdump_path:
-            objdump_path = ToolFinder.find_tool_path('llvm-objdump', self.ndk_path, arch)
-            if not objdump_path:
-                log_exit("Can't find llvm-objdump." + NDK_ERROR_MESSAGE)
-            self.objdump_paths[arch] = objdump_path
+        objdump_path = self._objdump_path(arch)
 
         # Run objdump.
         start_addr = sorted_addr_ranges[0].start

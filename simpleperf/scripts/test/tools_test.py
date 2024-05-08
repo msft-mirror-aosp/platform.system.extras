@@ -334,6 +334,14 @@ ffffffc0089bbb34:      	stp	x29, x30, [sp, #-0x30]!
             ('  200004:      	stp	x20, x19, [sp, #0x10]', 0x200004),
             ('', 0)])
 
+    def test_objdump_whole(self):
+        binary_finder = BinaryFinder(TestHelper.testdata_dir, ReadElf(TestHelper.ndk_path))
+        objdump = Objdump(TestHelper.ndk_path, binary_finder)
+        dso_info = objdump.get_dso_info("/simpleperf_runtest_two_functions_arm64", None)
+        disassembly = objdump.disassemble_whole(dso_info)
+        self.assertEqual(len(disassembly), 98)
+        self.assertEqual(disassembly[4492], '    118c: d61f0220     \tbr\tx17')
+
     def test_readelf(self):
         test_map = {
             'simpleperf_runtest_two_functions_arm64': {
