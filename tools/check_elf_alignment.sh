@@ -16,7 +16,7 @@ usage() {
   echo "Shared libraries are reported ALIGNED when their ELF regions are"
   echo "16 KB or 64 KB aligned. Otherwise they are reported as UNALIGNED."
   echo
-  echo "Usage: ${progname} [input-path|input-APK]"
+  echo "Usage: ${progname} [input-path|input-APK|input-APEX]"
 }
 
 if [ ${#} -ne 1 ]; then
@@ -40,12 +40,12 @@ if ! [ -f "${dir}" -o -d "${dir}" ]; then
   exit 1
 fi
 
-if [[ ${dir} == *.apk ]]; then
+if [[ "${dir}" == *.apk ]]; then
   trap 'cleanup_trap' EXIT
 
   if { zipalign --help 2>&1 | grep -q "\-P <pagesize_kb>"; }; then
     echo "=== APK zip-alignment ==="
-    zipalign -v -c -P 16 4 ${dir} | egrep 'lib/arm64-v8a|lib/x86_64|Verification'
+    zipalign -v -c -P 16 4 "${dir}" | egrep 'lib/arm64-v8a|lib/x86_64|Verification'
     echo "========================="
   else
     echo "NOTICE: Zip alignment check requires build-tools version 35.0.0-rc3 or higher."
@@ -55,10 +55,19 @@ if [[ ${dir} == *.apk ]]; then
     echo "    sdkmanager \"build-tools;35.0.0-rc3\""
   fi
 
-  dir_filename=$(basename ${dir})
-  tmp=$(mktemp -d -t ${dir_filename%.apk}_out_XXXXX)
-  unzip ${dir} lib/* -d ${tmp} >/dev/null 2>&1
-  dir=${tmp}
+  dir_filename=$(basename "${dir}")
+  tmp=$(mktemp -d -t "${dir_filename%.apk}_out_XXXXX")
+  unzip "${dir}" lib/* -d "${tmp}" >/dev/null 2>&1
+  dir="${tmp}"
+fi
+
+if [[ "${dir}" == *.apex ]]; then
+  trap 'cleanup_trap' EXIT
+
+  dir_filename=$(basename "${dir}")
+  tmp=$(mktemp -d -t "${dir_filename%.apex}_out_XXXXX")
+  deapexer extract "${dir}" "${tmp}" >/dev/null 2>&1
+  dir="${tmp}"
 fi
 
 RED="\e[31m"
@@ -70,15 +79,16 @@ unaligned_libs=()
 echo
 echo "=== ELF alignment ==="
 
-matches="$(find ${dir} -name "*.so" -type f)"
+matches="$(find "${dir}" -type f \( -name "*.so" -or -executable \))"
 IFS=$'\n'
 for match in $matches; do
-  res="$(objdump -p ${match} | grep LOAD | awk '{ print $NF }' | head -1)"
-  if [[ $res =~ "2**14" ]] || [[ $res =~ "2**16" ]]; then
+  [[ $(file "${match}") == *"ELF"* ]] || continue
+  res="$(objdump -p "${match}" | grep LOAD | awk '{ print $NF }' | head -1)"
+  if [[ $res =~ 2**(1[4-9]|[2-9][0-9]|[1-9][0-9]{2,}) ]]; then
     echo -e "${match}: ${GREEN}ALIGNED${ENDCOLOR} ($res)"
   else
     echo -e "${match}: ${RED}UNALIGNED${ENDCOLOR} ($res)"
-    unaligned_libs+=(${match})
+    unaligned_libs+=("${match}")
   fi
 done
 
