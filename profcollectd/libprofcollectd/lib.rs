@@ -21,6 +21,7 @@ mod report;
 mod scheduler;
 mod service;
 mod simpleperf_etm_trace_provider;
+mod simpleperf_lbr_trace_provider;
 mod trace_provider;
 
 #[cfg(feature = "test")]
@@ -84,7 +85,7 @@ pub fn init_service(schedule_now: bool) -> Result<()> {
 }
 
 fn get_profcollectd_service() -> Result<binder::Strong<dyn IProfCollectd::IProfCollectd>> {
-    binder::get_interface(PROFCOLLECTD_SERVICE_NAME)
+    binder::wait_for_interface(PROFCOLLECTD_SERVICE_NAME)
         .context("Failed to get profcollectd binder service, is profcollectd running?")
 }
 
@@ -125,11 +126,12 @@ pub fn reset() -> Result<()> {
 
 /// Inits logging for Android
 pub fn init_logging() {
-    let min_log_level = if cfg!(feature = "test") { log::Level::Info } else { log::Level::Error };
+    let max_log_level =
+        if cfg!(feature = "test") { log::LevelFilter::Info } else { log::LevelFilter::Error };
     android_logger::init_once(
         android_logger::Config::default()
             .with_tag("profcollectd")
-            .with_min_level(min_log_level)
-            .with_log_id(android_logger::LogId::System),
+            .with_max_level(max_log_level)
+            .with_log_buffer(android_logger::LogId::System),
     );
 }
