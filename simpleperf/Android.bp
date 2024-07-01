@@ -48,6 +48,9 @@ cc_defaults {
             ],
         },
     },
+    sanitize: {
+        hwaddress: false,
+    },
 }
 
 cc_defaults {
@@ -146,7 +149,6 @@ cc_defaults {
                 "libcutils",
                 "libprocinfo",
                 "libevent",
-                "libc++fs",
                 "librustc_demangle_static",
             ],
         },
@@ -193,7 +195,6 @@ cc_defaults {
                 "libunwindstack",
             ],
             static_libs: [
-                "libc++fs",
                 "libdexfile_support",
                 "librustc_demangle_static",
             ],
@@ -777,5 +778,30 @@ cc_fuzz {
         windows: {
             enabled: false,
         },
+    },
+}
+
+genrule {
+    name: "simpleperf_script.zip",
+    tools: [
+        "soong_zip",
+    ],
+    srcs: [
+        "**/*.proto",
+        "app_api/**/*",
+        "doc/**/*",
+        "demo/**/*",
+        "runtest/**/*",
+        "scripts/**/*",
+        "testdata/**/*",
+    ],
+    cmd: "$(location soong_zip) -o $(out) -C system/extras/simpleperf " +
+        "-D system/extras/simpleperf ",
+    out: [
+        "simpleperf/simpleperf_script.zip",
+    ],
+    dist: {
+        targets: ["simpleperf"],
+        dir: "simpleperf",
     },
 }
