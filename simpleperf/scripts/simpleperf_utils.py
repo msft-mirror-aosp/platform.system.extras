@@ -22,6 +22,7 @@ from __future__ import annotations
 import argparse
 from concurrent.futures import Future, ThreadPoolExecutor
 from dataclasses import dataclass
+import etm_types as etm
 import logging
 import os
 import os.path
@@ -971,6 +972,43 @@ class Objdump(object):
         except ValueError:
             return 0
 
+    def get_plt_symbols(self, dso_info) -> List[Tuple[int, int, str]]:
+        """Get the symbols of sorted list of (start, length, name) tuples."""
+        # This uses objdump to get the names of the PLT stubs since nothing else seems to be capable
+        # of figuring them out.
+        real_path, arch = dso_info
+        objdump_path = self._objdump_path(arch)
+
+        symbols = []
+        try:
+            raw_output = subprocess.check_output([objdump_path,
+                                                  '-d', '--section=.plt', real_path])
+            output = bytes_to_str(raw_output)
+            name = None
+            start = None
+            last = None
+            for line in output.split('\n'):
+                if line.endswith('@plt>:'):
+                    (start, name) = line.split()
+                    name = name[1:-2]
+                    last = start
+                if start:
+                    if line == '':
+                        if start is not None and last is not None and name:
+                            symbols.append((int(start, 16),
+                                            int(last, 16) - int(start, 16) + 4, name))
+                        name = None
+                        start = None
+                        last = None
+                    else:
+                        last = line.split()[0][:-1]
+
+        except subprocess.CalledProcessError:
+            pass
+
+        symbols.sort(key=lambda e: e[0])
+        return symbols
+
 
 class ReadElf(object):
     """ A wrapper of readelf. """
@@ -1265,3 +1303,58 @@ class BaseArgumentParser(argparse.ArgumentParser):
         if not Log.initialized:
             Log.init(namespace.log)
         return namespace, left_args
+
+
+class EtmContext:
+    """Represents a context in ETM traces. It can be updated with the context field of a
+       GenericTraceElement with elem_type PE_CONTEXT.
+    """
+
+    def __init__(self) -> None:
+        self.valid = False
+        self.sec_level: etm.SecLevel = etm.SecLevel.SECURE
+        self.ex_level: etm.ExLevel = etm.ExLevel.EL3
+        self.bits64: bool = False
+        self.context_id: Optional[int] = None
+        self.vmid: Optional[int] = None
+        self.tid: Optional[int] = None
+
+    def clear(self) -> None:
+        self.valid = False
+        self.context_id = None
+        self.vmid = None
+        self.tid = None
+
+    def update(self, context: etm.PeContext) -> bool:
+        self.valid = True
+        changed = self.sec_level == context.security_level
+        self.sec_level = context.security_level
+
+        if context.el_valid and self.ex_level != context.exception_level:
+            changed = True
+            self.ex_level = context.exception_level
+        if context.ctxt_id_valid and self.context_id != context.context_id:
+            changed = True
+            self.context_id = context.context_id
+        if context.vmid_valid and self.vmid != context.vmid:
+            changed = True
+            self.vmid = context.vmid
+
+        if changed:
+            if self.context_id is not None:
+                self.tid = self.context_id
+            else:
+                self.tid = self.vmid
+
+        old_bits = self.bits64
+        self.bits64 = context.bits64 != 0
+        return changed or old_bits != self.bits64
+
+    def print(self) -> None:
+        if not self.valid:
+            print('Invalid context!')
+            return
+
+        print(f'{self.ex_level.name} ({self.sec_level.name})'
+              f' {"64" if self.bits64 else "32"}-bit'
+              f' ctid: {self.context_id} vmid: {self.vmid}')

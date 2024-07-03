@@ -25,58 +25,7 @@ from typing import Callable, Dict, Optional, Tuple
 
 import etm_types as etm
 from simpleperf_report_lib import ReportLib
-from simpleperf_utils import bytes_to_str, BinaryFinder, log_exit, ReadElf, Objdump, ToolFinder
-
-
-class Context:
-    def __init__(self) -> None:
-        self.valid = False
-        self.sec_level: etm.SecLevel = etm.SecLevel.SECURE
-        self.ex_level: etm.ExLevel = etm.ExLevel.EL3
-        self.bits64: bool = False
-        self.context_id: Optional[int] = None
-        self.vmid: Optional[int] = None
-        self.tid: Optional[int] = None
-
-    def clear(self) -> None:
-        self.valid = False
-        self.context_id = None
-        self.vmid = None
-        self.tid = None
-
-    def update(self, context: etm.PeContext) -> bool:
-        self.valid = True
-        changed = self.sec_level == context.security_level
-        self.sec_level = context.security_level
-
-        if context.el_valid and self.ex_level != context.exception_level:
-            changed = True
-            self.ex_level = context.exception_level
-        if context.ctxt_id_valid and self.context_id != context.context_id:
-            changed = True
-            self.context_id = context.context_id
-        if context.vmid_valid and self.vmid != context.vmid:
-            changed = True
-            self.vmid = context.vmid
-
-        if changed:
-            if self.context_id is not None:
-                self.tid = self.context_id
-            else:
-                self.tid = self.vmid
-
-        old_bits = self.bits64
-        self.bits64 = context.bits64 != 0
-        return changed or old_bits != self.bits64
-
-    def print(self) -> None:
-        if not self.valid:
-            print('Invalid context!')
-            return
-
-        print(f'{self.ex_level.name} ({self.sec_level.name})'
-              f' {"64" if self.bits64 else "32"}-bit'
-              f' ctid: {self.context_id} vmid: {self.vmid}')
+from simpleperf_utils import bytes_to_str, BinaryFinder, EtmContext, log_exit, ReadElf, Objdump, ToolFinder
 
 
 class Tracer:
@@ -86,7 +35,7 @@ class Tracer:
         self.last_timestamp: Optional[int] = None
         self.lost_decoding = False
 
-        self.context = Context()
+        self.context = EtmContext()
 
         self.instructions = 0
         self.cycles = 0
