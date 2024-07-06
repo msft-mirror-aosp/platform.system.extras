@@ -65,7 +65,7 @@ impl IProfCollectd for ProfcollectdBinderService {
             .context("Failed to terminate collection.")
             .map_err(err_to_binder_status)
     }
-    fn trace_once(&self, tag: &str) -> BinderResult<()> {
+    fn trace_system(&self, tag: &str) -> BinderResult<()> {
         let lock = &mut *self.lock();
         lock.scheduler
             .one_shot(&lock.config, tag)
