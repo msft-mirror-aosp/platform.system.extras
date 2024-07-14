@@ -68,8 +68,15 @@ impl IProfCollectd for ProfcollectdBinderService {
     fn trace_system(&self, tag: &str) -> BinderResult<()> {
         let lock = &mut *self.lock();
         lock.scheduler
-            .one_shot(&lock.config, tag)
-            .context("Failed to initiate an one-off trace.")
+            .trace_system(&lock.config, tag)
+            .context("Failed to perform system-wide trace.")
+            .map_err(err_to_binder_status)
+    }
+    fn trace_process(&self, tag: &str, process: &str) -> BinderResult<()> {
+        let lock = &mut *self.lock();
+        lock.scheduler
+            .trace_process(&lock.config, tag, process)
+            .context("Failed to perform process trace.")
             .map_err(err_to_binder_status)
     }
     fn process(&self) -> BinderResult<()> {
