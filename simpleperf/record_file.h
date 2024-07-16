@@ -102,6 +102,7 @@ class RecordFileWriter {
   bool WriteMetaInfoFeature(const std::unordered_map<std::string, std::string>& info_map);
   bool WriteDebugUnwindFeature(const DebugUnwindFeature& debug_unwind);
   bool WriteInitMapFeature(const char* data, size_t size);
+  bool FinishWritingInitMapFeature();
   bool WriteFeature(int feature, const char* data, size_t size);
   bool EndWriteFeatures();
 

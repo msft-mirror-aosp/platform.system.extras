@@ -2255,9 +2255,10 @@ bool RecordCommand::DumpInitMapFeature() {
     return false;
   }
   auto callback = [&](const char* data, size_t size) {
-    return record_file_writer_->WriteFeature(PerfFileFormat::FEAT_INIT_MAP, data, size);
+    return record_file_writer_->WriteInitMapFeature(data, size);
   };
-  return map_record_thread_->ReadMapRecordData(callback);
+  return map_record_thread_->ReadMapRecordData(callback) &&
+         record_file_writer_->FinishWritingInitMapFeature();
 }
 
 }  // namespace

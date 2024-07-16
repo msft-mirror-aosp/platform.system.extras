@@ -571,7 +571,27 @@ bool RecordFileWriter::WriteDebugUnwindFeature(const DebugUnwindFeature& debug_u
 }
 
 bool RecordFileWriter::WriteInitMapFeature(const char* data, size_t size) {
-  return WriteFeatureBegin(FEAT_INIT_MAP) && Write(data, size) && WriteFeatureEnd(FEAT_INIT_MAP);
+  if (!WriteFeatureBegin(FEAT_INIT_MAP)) {
+    return false;
+  }
+  if (compressor_) {
+    if (!compressor_->AddInputData(data, size) || !WriteCompressorOutput(false, false)) {
+      return false;
+    }
+  } else {
+    if (!Write(data, size)) {
+      return false;
+    }
+  }
+  return WriteFeatureEnd(FEAT_INIT_MAP);
+}
+
+bool RecordFileWriter::FinishWritingInitMapFeature() {
+  if (compressor_) {
+    return WriteFeatureBegin(FEAT_INIT_MAP) && WriteCompressorOutput(true, false) &&
+           WriteFeatureEnd(FEAT_INIT_MAP);
+  }
+  return true;
 }
 
 bool RecordFileWriter::WriteFeature(int feature, const char* data, size_t size) {
