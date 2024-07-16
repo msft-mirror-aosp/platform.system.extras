@@ -83,6 +83,7 @@ class ZstdCompressor : public Compressor {
         return false;
       }
       out_buffer_.ProduceData(output.pos);
+      total_output_size_ += output.pos;
     }
     total_input_size_ += size;
     return true;
