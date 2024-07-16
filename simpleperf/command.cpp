@@ -69,7 +69,6 @@ bool ConvertArgsToOptions(const std::vector<std::string>& args,
     const OptionName& name = it->first;
     const OptionFormat& format = it->second;
     OptionValue value;
-    memset(&value, 0, sizeof(value));
 
     if (i + 1 == args.size()) {
       if (format.value_type != OptionValueType::NONE &&
