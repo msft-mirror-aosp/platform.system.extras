@@ -24,6 +24,7 @@
 #include <vector>
 
 #include <android-base/logging.h>
+#include <android-base/scopeguard.h>
 
 #include "event_attr.h"
 #include "record.h"
@@ -824,6 +825,8 @@ bool RecordFileReader::ReadAuxData(uint32_t cpu, uint64_t aux_offset, size_t siz
     error = true;
     return false;
   }
+  android::base::ScopeGuard guard([&]() { fseek(record_fp_, saved_pos, SEEK_SET); });
+
   OverflowResult aux_end = SafeAdd(aux_offset, size);
   if (aux_end.overflow) {
     LOG(ERROR) << "aux_end overflow";
@@ -843,9 +846,7 @@ bool RecordFileReader::ReadAuxData(uint32_t cpu, uint64_t aux_offset, size_t siz
     auto location_it = std::upper_bound(it->second.begin(), it->second.end(), aux_offset, comp);
     if (location_it != it->second.begin()) {
       --location_it;
-      if (location_it->aux_offset + location_it->aux_size >= aux_end.value) {
-        location = &*location_it;
-      }
+      location = &*location_it;
     }
   }
   if (location == nullptr) {
@@ -854,15 +855,13 @@ bool RecordFileReader::ReadAuxData(uint32_t cpu, uint64_t aux_offset, size_t siz
               << size << ". Probably the data is lost when recording.";
     return false;
   }
+  if (decompressor_) {
+    return ReadAuxDataFromDecompressor(cpu, aux_offset, size, buf, *location, error);
+  }
   if (buf.size() < size) {
     buf.resize(size);
   }
   if (!ReadAtOffset(aux_offset - location->aux_offset + location->file_offset, buf.data(), size)) {
-    error = true;
-    return false;
-  }
-  if (fseek(record_fp_, saved_pos, SEEK_SET) != 0) {
-    PLOG(ERROR) << "fseek() failed";
     error = true;
     return false;
   }
@@ -901,6 +900,48 @@ bool RecordFileReader::BuildAuxDataLocation() {
       aux_data_location_[auxtrace.data->cpu].emplace_back(location);
     }
   }
+  return true;
+}
+
+bool RecordFileReader::ReadAuxDataFromDecompressor(uint32_t cpu, uint64_t aux_offset, size_t size,
+                                                   std::vector<uint8_t>& buf,
+                                                   const AuxDataLocation& location, bool& error) {
+  if (!auxdata_decompressor_) {
+    auxdata_decompressor_.reset(new AuxDataDecompressor);
+    auxdata_decompressor_->decompressor = CreateZstdDecompressor();
+    if (!auxdata_decompressor_->decompressor) {
+      error = true;
+      return false;
+    }
+  }
+  if (auxdata_decompressor_->cpu != cpu || auxdata_decompressor_->location != location) {
+    auxdata_decompressor_->cpu = cpu;
+    auxdata_decompressor_->location = location;
+    Decompressor& decompressor = *auxdata_decompressor_->decompressor;
+    // Read and decompress new aux data.
+    std::string_view output = decompressor.GetOutputData();
+    if (!output.empty()) {
+      decompressor.ConsumeOutputData(output.size());
+    }
+    std::vector<char> input(location.aux_size);
+    if (!ReadAtOffset(location.file_offset, input.data(), input.size()) ||
+        !decompressor.AddInputData(input.data(), input.size())) {
+      error = true;
+      return false;
+    }
+  }
+  std::string_view data = auxdata_decompressor_->decompressor->GetOutputData();
+  if (location.aux_offset + data.size() < aux_offset + size) {
+    // ETM data can be dropped when recording if the userspace buffer is full. This isn't an
+    // error.
+    LOG(INFO) << "aux data is missing: cpu " << cpu << ", aux_offset " << aux_offset << ", size "
+              << size << ". Probably the data is lost when recording.";
+    return false;
+  }
+  if (buf.size() < size) {
+    buf.resize(size);
+  }
+  memcpy(buf.data(), &data[aux_offset - location.aux_offset], size);
   return true;
 }
 

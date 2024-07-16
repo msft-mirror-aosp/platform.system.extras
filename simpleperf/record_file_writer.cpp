@@ -144,10 +144,11 @@ bool RecordFileWriter::WriteRecord(const Record& record) {
   // RECORD_SPLIT records, followed by a RECORD_SPLIT_END record.
   constexpr uint32_t RECORD_SIZE_LIMIT = 65535;
   if (record.size() <= RECORD_SIZE_LIMIT) {
-    bool result = write_data(record.Binary(), record.size());
-    if (result && record.type() == PERF_RECORD_AUXTRACE) {
-      auto auxtrace = static_cast<const AuxTraceRecord*>(&record);
-      result = write_data(auxtrace->location.addr, auxtrace->data->aux_size);
+    bool result = true;
+    if (record.type() == PERF_RECORD_AUXTRACE) {
+      result = WriteAuxTraceRecord(static_cast<const AuxTraceRecord&>(record));
+    } else {
+      result = write_data(record.Binary(), record.size());
     }
     if (!result) {
       return false;
@@ -187,6 +188,34 @@ bool RecordFileWriter::WriteRecord(const Record& record) {
     return WriteCompressorOutput(false, true);
   }
   return true;
+}
+
+bool RecordFileWriter::WriteAuxTraceRecord(const AuxTraceRecord& r) {
+  if (compressor_) {
+    // For auxtrace record:
+    // 1. Write PERF_RECORD_AUXTRACE (not compressed)
+    // 2. Write compressed aux data (compressed separately)
+    if (!WriteCompressorOutput(true, true)) {
+      return false;
+    }
+    auxtrace_record_offsets_.emplace_back(data_section_offset_ + data_section_size_);
+    // TODO: Try using a separate compressor with dictionary for ETM data.
+    if (!compressor_->AddInputData(r.location.addr, r.data->aux_size) ||
+        !compressor_->FlushOutputData()) {
+      return false;
+    }
+    std::string_view compressed_data = compressor_->GetOutputData();
+    AuxTraceRecord new_r(compressed_data.size(), r.data->offset, r.data->idx, r.data->tid,
+                         r.data->cpu);
+    if (!WriteData(new_r.Binary(), new_r.size()) ||
+        !WriteData(compressed_data.data(), compressed_data.size())) {
+      return false;
+    }
+    compressor_->ConsumeOutputData(compressed_data.size());
+    return true;
+  }
+  auxtrace_record_offsets_.emplace_back(data_section_offset_ + data_section_size_);
+  return WriteData(r.Binary(), r.size()) && WriteData(r.location.addr, r.data->aux_size);
 }
 
 bool RecordFileWriter::FinishWritingDataSection() {

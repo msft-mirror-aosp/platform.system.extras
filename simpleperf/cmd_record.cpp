@@ -885,6 +885,16 @@ bool RecordCommand::PostProcessRecording(const std::vector<std::string>& args) {
   time_stat_.post_process_time = GetSystemClock();
 
   // 5. Show brief record result.
+  auto report_compression_stat = [&]() {
+    if (auto compressor = record_file_writer_->GetCompressor(); compressor != nullptr) {
+      uint64_t original_size = compressor->TotalInputSize();
+      uint64_t compressed_size = compressor->TotalOutputSize();
+      LOG(INFO) << "Record compressed: " << ReadableBytes(compressed_size) << " (original "
+                << ReadableBytes(original_size) << ", ratio " << std::setprecision(2)
+                << (static_cast<double>(original_size) / compressed_size) << ")";
+    }
+  };
+
   auto record_stat = event_selection_set_.GetRecordStat();
   if (event_selection_set_.HasAuxTrace()) {
     LOG(INFO) << "Aux data traced: " << ReadableCount(record_stat.aux_data_size);
@@ -892,6 +902,7 @@ bool RecordCommand::PostProcessRecording(const std::vector<std::string>& args) {
       LOG(INFO) << "Aux data lost in user space: " << ReadableCount(record_stat.lost_aux_data_size)
                 << ", consider increasing userspace buffer size(--user-buffer-size).";
     }
+    report_compression_stat();
   } else {
     // Here we report all lost records as samples. This isn't accurate. Because records like
     // MmapRecords are not samples. But It's easier for users to understand.
@@ -912,14 +923,7 @@ bool RecordCommand::PostProcessRecording(const std::vector<std::string>& args) {
     }
     os << ".";
     LOG(INFO) << os.str();
-
-    if (auto compressor = record_file_writer_->GetCompressor(); compressor != nullptr) {
-      uint64_t original_size = compressor->TotalInputSize();
-      uint64_t compressed_size = compressor->TotalOutputSize();
-      LOG(INFO) << "Record compressed: " << ReadableBytes(compressed_size) << " (original "
-                << ReadableBytes(original_size) << ", ratio " << (original_size / compressed_size)
-                << ")";
-    }
+    report_compression_stat();
 
     LOG(DEBUG) << "Record stat: kernelspace_lost_records="
                << ReadableCount(record_stat.kernelspace_lost_records)
@@ -1364,12 +1368,6 @@ bool RecordCommand::ParseOptions(const std::vector<std::string>& args,
   if (clockid_.empty()) {
     clockid_ = IsSettingClockIdSupported() ? "monotonic" : "perf";
   }
-
-  if (event_selection_set_.HasAuxTrace() && compression_level_ != 0) {
-    LOG(ERROR) << "etm data compression not supported yet";
-    return false;
-  }
-
   return true;
 }
 
@@ -2005,7 +2003,7 @@ bool RecordCommand::DumpAdditionalFeatures(const std::vector<std::string>& args)
     kernel_symbols_available = true;
   }
   std::unordered_set<int> loaded_symbol_maps;
-  std::vector<uint64_t> auxtrace_offset;
+  const std::vector<uint64_t>& auxtrace_offset = record_file_writer_->AuxTraceRecordOffsets();
   std::unordered_set<Dso*> debug_unwinding_files;
   bool failed_unwinding_sample = false;
 
@@ -2023,15 +2021,12 @@ bool RecordCommand::DumpAdditionalFeatures(const std::vector<std::string>& args)
       } else {
         CollectHitFileInfo(*sample, nullptr);
       }
-    } else if (r->type() == PERF_RECORD_AUXTRACE) {
-      auto auxtrace = static_cast<const AuxTraceRecord*>(r);
-      auxtrace_offset.emplace_back(auxtrace->location.file_offset - auxtrace->size());
     } else if (r->type() == SIMPLE_PERF_RECORD_UNWINDING_RESULT) {
       failed_unwinding_sample = true;
     }
   };
 
-  if (!record_file_writer_->ReadDataSection(callback)) {
+  if (!event_selection_set_.HasAuxTrace() && !record_file_writer_->ReadDataSection(callback)) {
     return false;
   }
 

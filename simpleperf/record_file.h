@@ -89,6 +89,7 @@ class RecordFileWriter {
 
   uint64_t GetDataSectionSize() const { return data_section_size_; }
   bool ReadDataSection(const std::function<void(const Record*)>& callback);
+  const std::vector<uint64_t>& AuxTraceRecordOffsets() const { return auxtrace_record_offsets_; }
 
   bool BeginWriteFeatures(size_t feature_count);
   bool WriteBuildIdFeature(const std::vector<BuildIdRecord>& build_id_records);
@@ -112,6 +113,7 @@ class RecordFileWriter {
                              std::vector<std::string>* hit_kernel_modules,
                              std::vector<std::string>* hit_user_files);
   bool WriteFileHeader();
+  bool WriteAuxTraceRecord(const AuxTraceRecord& r);
   // If flush=true, the previous data can be decompressed without any following data.
   bool WriteCompressorOutput(bool flush, bool data_section);
   bool WriteCompressRecord(const char* data, size_t size, bool data_section);
@@ -140,6 +142,7 @@ class RecordFileWriter {
   size_t feature_count_;
 
   std::unique_ptr<Compressor> compressor_;
+  std::vector<uint64_t> auxtrace_record_offsets_;
 
   DISALLOW_COPY_AND_ASSIGN(RecordFileWriter);
 };
@@ -220,6 +223,20 @@ class RecordFileReader {
     uint64_t end = 0;
   };
 
+  struct AuxDataLocation {
+    uint64_t aux_offset;
+    uint64_t aux_size;
+    uint64_t file_offset;
+
+    AuxDataLocation(uint64_t aux_offset = 0, uint64_t aux_size = 0, uint64_t file_offset = 0)
+        : aux_offset(aux_offset), aux_size(aux_size), file_offset(file_offset) {}
+
+    bool operator!=(const AuxDataLocation& other) const {
+      return aux_offset != other.aux_offset || aux_size != other.aux_size ||
+             file_offset != other.file_offset;
+    }
+  };
+
   RecordFileReader(const std::string& filename, FILE* fp);
   bool ReadHeader();
   bool CheckSectionDesc(const PerfFileFormat::SectionDesc& desc, uint64_t min_offset,
@@ -236,6 +253,9 @@ class RecordFileReader {
   bool Read(void* buf, size_t len);
   void ProcessEventIdRecord(const EventIdRecord& r);
   bool BuildAuxDataLocation();
+  bool ReadAuxDataFromDecompressor(uint32_t cpu, uint64_t aux_offset, size_t size,
+                                   std::vector<uint8_t>& buf, const AuxDataLocation& location,
+                                   bool& error);
 
   const std::string filename_;
   FILE* record_fp_;
@@ -255,18 +275,17 @@ class RecordFileReader {
   std::unique_ptr<ScopedCurrentArch> scoped_arch_;
   std::unique_ptr<ScopedEventTypes> scoped_event_types_;
 
-  struct AuxDataLocation {
-    uint64_t aux_offset;
-    uint64_t aux_size;
-    uint64_t file_offset;
-
-    AuxDataLocation(uint64_t aux_offset, uint64_t aux_size, uint64_t file_offset)
-        : aux_offset(aux_offset), aux_size(aux_size), file_offset(file_offset) {}
-  };
   // It maps from a cpu id to the locations (file offsets in perf.data) of aux data received from
   // that cpu's aux buffer. It is used to locate aux data in perf.data.
   std::unordered_map<uint32_t, std::vector<AuxDataLocation>> aux_data_location_;
   std::unique_ptr<Decompressor> decompressor_;
+
+  struct AuxDataDecompressor {
+    uint32_t cpu = 0;
+    AuxDataLocation location;
+    std::unique_ptr<Decompressor> decompressor;
+  };
+  std::unique_ptr<AuxDataDecompressor> auxdata_decompressor_;
 
   DISALLOW_COPY_AND_ASSIGN(RecordFileReader);
 };
