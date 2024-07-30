@@ -512,8 +512,7 @@ TEST(record_cmd, stop_when_no_more_targets) {
     sleep(1);
   });
   thread.detach();
-  while (tid == 0)
-    ;
+  while (tid == 0);
   ASSERT_TRUE(RecordCmd()->Run(
       {"-o", tmpfile.path, "-t", std::to_string(tid), "--in-app", "-e", GetDefaultEvent()}));
 }
@@ -791,11 +790,17 @@ class RecordingAppHelper {
       return success;
     };
     ProcessSymbolsInPerfDataFile(GetDataPath(), callback);
+    size_t sample_count = GetSampleCount();
     if (!success) {
-      if (IsInEmulator() && !HasSample()) {
+      if (IsInEmulator()) {
         // In emulator, the monitored app may not have a chance to run.
-        GTEST_LOG_(INFO) << "No samples are recorded. Skip checking symbols.";
-        return true;
+        constexpr size_t MIN_SAMPLES_TO_CHECK_SYMBOLS = 1000;
+        if (size_t sample_count = GetSampleCount(); sample_count < MIN_SAMPLES_TO_CHECK_SYMBOLS) {
+          GTEST_LOG_(INFO) << "Only " << sample_count
+                           << " samples recorded in the emulator. Skip checking symbols (need "
+                           << MIN_SAMPLES_TO_CHECK_SYMBOLS << " samples).";
+          return true;
+        }
       }
       DumpData();
     }
@@ -807,22 +812,22 @@ class RecordingAppHelper {
   std::string GetDataPath() const { return perf_data_file_.path; }
 
  private:
-  bool HasSample() {
+  size_t GetSampleCount() {
+    size_t sample_count = 0;
     std::unique_ptr<RecordFileReader> reader = RecordFileReader::CreateInstance(GetDataPath());
     if (!reader) {
-      return false;
+      return sample_count;
     }
-    bool has_sample = false;
     auto process_record = [&](std::unique_ptr<Record> r) {
       if (r->type() == PERF_RECORD_SAMPLE) {
-        has_sample = true;
+        sample_count++;
       }
       return true;
     };
     if (!reader->ReadDataSection(process_record)) {
-      return false;
+      return sample_count;
     }
-    return has_sample;
+    return sample_count;
   }
 
   AppHelper app_helper_;
@@ -1461,4 +1466,16 @@ TEST(record_cmd, delay_option) {
   TemporaryFile tmpfile;
   ASSERT_TRUE(RecordCmd()->Run(
       {"-o", tmpfile.path, "-e", GetDefaultEvent(), "--delay", "100", "sleep", "1"}));
+}
+
+// @CddTest = 6.1/C-0-2
+TEST(record_cmd, compression_option) {
+  TemporaryFile tmpfile;
+  ASSERT_TRUE(RunRecordCmd({"-z"}, tmpfile.path));
+  std::unique_ptr<RecordFileReader> reader = RecordFileReader::CreateInstance(tmpfile.path);
+  ASSERT_TRUE(reader != nullptr);
+  std::vector<std::unique_ptr<Record>> records = reader->DataSection();
+  ASSERT_GT(records.size(), 0U);
+
+  ASSERT_TRUE(RunRecordCmd({"-z=3"}, tmpfile.path));
 }
