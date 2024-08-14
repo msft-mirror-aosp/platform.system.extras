@@ -419,6 +419,15 @@ class TestReportLib(TestBase):
              '0xb4f1b49b0fe9e34e78fb14e5374c930c00000000'}
         )
 
+    def test_symbols(self):
+        record_file = TestHelper.testdata_path("runtest_two_functions_arm64_perf.data")
+        self.report_lib.SetRecordFile(record_file)
+        self.assertEqual(set(self.report_lib.GetSymbols("/data/local/tmp/simpleperf_runtest_two_functions_arm64")),
+                         set([(4172, 112, 'Function1()'),
+                              (4284, 112, 'Function2()'),
+                              (4396, 28, 'main')]))
+        self.assertEqual(self.report_lib.GetSymbols("/nonexistent_file.so"), None)
+
 
 class TestProtoFileReportLib(TestBase):
     def test_smoke(self):

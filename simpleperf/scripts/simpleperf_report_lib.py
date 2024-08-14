@@ -359,6 +359,8 @@ class ReportLib(object):
         self._GetThread = self._lib.GetThread
         self._GetThread.restype = Thread
         self._GetThread.argtypes = [ct.POINTER(ReportLibStructure), ct.c_int]
+        self._ReadSymbolsForPath = self._lib.ReadSymbolsForPath
+        self._ReadSymbolsForPath.restype = ct.POINTER(SymbolStruct)
         self._instance = self._CreateReportLibFunc()
         assert not _is_null(self._instance)
 
@@ -664,6 +666,24 @@ class ReportLib(object):
             return (r.pid, r.tid, _char_pt_to_str(r.comm))
         else:
             return None
+
+    def GetSymbols(self, path: str) -> Optional[List[Tuple[int, int, str]]]:
+        """Return a list of symbols for path, in the form of tuples of start address,
+           length and name.
+        """
+        symbols = self._ReadSymbolsForPath(self.getInstance(), _char_pt(path))
+        if not symbols:
+            return None
+
+        i = 0
+        result = []
+        while symbols[i]._symbol_name:
+            result.append((symbols[i].symbol_addr,
+                           symbols[i].symbol_len,
+                           symbols[i].symbol_name))
+            i += 1
+
+        return result
 
 
 ProtoSample = namedtuple('ProtoSample', ['ip', 'pid', 'tid',

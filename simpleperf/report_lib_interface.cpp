@@ -269,6 +269,7 @@ class ReportLib {
   DsoAddress ConvertETMAddressToVaddrInFile(uint8_t trace_id, uint64_t address);
 
   Thread GetThread(int tid);
+  SymbolEntry* ReadSymbolsForPath(const char* path);
 
  private:
   std::unique_ptr<SampleRecord> GetNextSampleRecord();
@@ -317,6 +318,7 @@ class ReportLib {
   std::vector<uint8_t> aux_data_buffer_;
   std::string filepath_;
   std::string comm_;
+  std::vector<SymbolEntry> symbols_;
 };
 
 bool ReportLib::SetLogSeverity(const char* log_level) {
@@ -782,6 +784,24 @@ Thread ReportLib::GetThread(int tid) {
   return result;
 }
 
+SymbolEntry* ReportLib::ReadSymbolsForPath(const char* path) {
+  std::string filename(path);
+  Dso* dso = thread_tree_.FindUserDso(filename);
+  if (!dso) {
+    return nullptr;
+  }
+  dso->LoadSymbols();
+  auto symbols = dso->GetSymbols();
+
+  symbols_.clear();
+  symbols_.reserve(symbols.size() + 1);
+  for (auto& symbol : symbols) {
+    symbols_.emplace_back(nullptr, 0, symbol.DemangledName(), symbol.addr, symbol.len, nullptr);
+  }
+  symbols_.emplace_back(nullptr, 0, nullptr, 0, 0, nullptr);
+  return symbols_.data();
+}
+
 }  // namespace simpleperf
 
 using ReportLib = simpleperf::ReportLib;
@@ -828,6 +848,7 @@ void SetETMCallback(ReportLib* report_lib, void (*callback)(const uint8_t, const
 DsoAddress ConvertETMAddressToVaddrInFile(ReportLib* report_lib, uint8_t trace_id,
                                           uint64_t address) EXPORT;
 Thread GetThread(ReportLib* report_lib, int tid) EXPORT;
+SymbolEntry* ReadSymbolsForPath(ReportLib* report_lib, const char* path) EXPORT;
 }
 
 // Exported methods working with a client created instance
@@ -943,4 +964,8 @@ DsoAddress ConvertETMAddressToVaddrInFile(ReportLib* report_lib, uint8_t trace_i
 
 Thread GetThread(ReportLib* report_lib, int tid) {
   return report_lib->GetThread(tid);
+}
+
+SymbolEntry* ReadSymbolsForPath(ReportLib* report_lib, const char* path) {
+  return report_lib->ReadSymbolsForPath(path);
 }

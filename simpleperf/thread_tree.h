@@ -140,6 +140,7 @@ class ThreadTree {
   void Update(const Record& record);
 
   std::vector<Dso*> GetAllDsos() const;
+  Dso* FindUserDso(const std::string& filename);
   Dso* FindUserDsoOrNew(const std::string& filename, uint64_t start_addr = 0,
                         DsoType dso_type = DSO_ELF_FILE);
 
