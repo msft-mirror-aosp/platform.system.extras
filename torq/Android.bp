@@ -17,25 +17,62 @@ package {
     default_applicable_licenses: ["Android-Apache-2.0"],
 }
 
-python_binary_host {
-    name: "torq",
+python_defaults {
+    name: "torq_defaults",
     srcs: [
         "torq.py",
         "command.py",
         "command_executor.py",
         "validation_error.py",
+        "device.py",
+        "config_builder.py",
     ],
+}
+
+python_binary_host {
+    name: "torq",
+    main: "torq.py",
+    defaults: ["torq_defaults"],
 }
 
 python_test_host {
     name: "torq_unit_test",
     main: "tests/torq_unit_test.py",
     srcs: ["tests/torq_unit_test.py"],
+    defaults: ["torq_defaults"],
     version: {
-        py2: {
-            enabled: false,
+        py3: {
+            enabled: true,
             embedded_launcher: false,
         },
+    },
+    test_options: {
+        unit_test: true,
+    },
+}
+
+python_test_host {
+    name: "device_unit_test",
+    main: "tests/device_unit_test.py",
+    srcs: ["tests/device_unit_test.py"],
+    defaults: ["torq_defaults"],
+    version: {
+        py3: {
+            enabled: true,
+            embedded_launcher: false,
+        },
+    },
+    test_options: {
+        unit_test: true,
+    },
+}
+
+python_test_host {
+    name: "config_builder_unit_test",
+    main: "tests/config_builder_unit_test.py",
+    srcs: ["tests/config_builder_unit_test.py"],
+    defaults: ["torq_defaults"],
+    version: {
         py3: {
             enabled: true,
             embedded_launcher: false,
