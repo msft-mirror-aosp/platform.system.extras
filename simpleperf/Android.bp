@@ -766,6 +766,9 @@ cc_fuzz {
     defaults: [
         "simpleperf_static_libs",
     ],
+    fuzzing_frameworks: {
+        afl: false,
+    },
     host_supported: true,
     srcs: [
         "simpleperf_writer_fuzzer.cpp",
