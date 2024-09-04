@@ -15,8 +15,8 @@
 #
 
 from abc import ABC, abstractmethod
-from command_executor import ProfilerCommandExecutor, HWCommandExecutor, \
-  ConfigCommandExecutor
+from command_executor import ProfilerCommandExecutor, \
+  UserSwitchCommandExecutor, HWCommandExecutor, ConfigCommandExecutor
 from validation_error import ValidationError
 
 
@@ -45,7 +45,7 @@ class ProfilerCommand(Command):
   """
   def __init__(self, type, event, profiler, out_dir, dur_ms, app, runs,
       simpleperf_event, perfetto_config, between_dur_ms, ui,
-      exclude_ftrace_event, include_ftrace_event, from_user, to_user):
+      excluded_ftrace_events, included_ftrace_events, from_user, to_user):
     super().__init__(type)
     self.event = event
     self.profiler = profiler
@@ -56,25 +56,46 @@ class ProfilerCommand(Command):
     self.simpleperf_event = simpleperf_event
     self.perfetto_config = perfetto_config
     self.between_dur_ms = between_dur_ms
-    self.ui = ui
-    self.exclude_ftrace_event = exclude_ftrace_event
-    self.include_ftrace_event = include_ftrace_event
+    self.use_ui = ui
+    self.excluded_ftrace_events = excluded_ftrace_events
+    self.included_ftrace_events = included_ftrace_events
     self.from_user = from_user
     self.to_user = to_user
-    self.command_executor = ProfilerCommandExecutor()
+    match event:
+      case "custom":
+        self.command_executor = ProfilerCommandExecutor()
+      case "user-switch":
+        self.original_user = None
+        self.command_executor = UserSwitchCommandExecutor()
+      case _:
+        raise ValueError("Invalid event name was used.")
 
   def validate(self, device):
     print("Further validating arguments of ProfilerCommand.")
-    # TODO: call relevant Device APIs according to args
     if self.app is not None:
       device.app_exists(self.app)
     if self.simpleperf_event is not None:
       device.simpleperf_event_exists(self.simpleperf_event)
-    if self.from_user is not None:
-      device.user_exists(self.from_user)
-    if self.to_user is not None:
-      device.user_exists(self.to_user)
-    return None
+    if self.event == "user-switch":
+      return self.validate_user_switch(device)
+
+  def validate_user_switch(self, device):
+    error = device.user_exists(self.to_user)
+    if error is not None:
+      return error
+    self.original_user = device.get_current_user()
+    if self.from_user is None:
+      self.from_user = self.original_user
+    else:
+      error = device.user_exists(self.from_user)
+      if error is not None:
+        return error
+    if self.from_user == self.to_user:
+      return ValidationError("Cannot perform user-switch to user %s because"
+                             " the current user on device %s is already %s."
+                             % (self.to_user, device.serial, self.from_user),
+                             "Choose a --to-user ID that is different than"
+                             " the --from-user ID.")
 
 
 class HWCommand(Command):
