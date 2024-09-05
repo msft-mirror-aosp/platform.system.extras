@@ -99,8 +99,12 @@ void DebugElfFileFinder::CollectBuildIdInDir(const std::string& dir) {
       BuildId build_id;
       ElfStatus status;
       auto elf = ElfFile::Open(path, &status);
-      if (status == ElfStatus::NO_ERROR && elf->GetBuildId(&build_id) == ElfStatus::NO_ERROR) {
-        build_id_to_file_map_[build_id.ToString()] = path;
+      if (status == ElfStatus::NO_ERROR) {
+        if (elf->GetBuildId(&build_id) == ElfStatus::NO_ERROR) {
+          build_id_to_file_map_[build_id.ToString()] = path;
+        } else {
+          no_build_id_files_.emplace_back(std::move(path));
+        }
       }
     }
   }
@@ -163,11 +167,11 @@ std::string DebugElfFileFinder::FindDebugFile(const std::string& dso_path, bool 
         return it->second;
       }
     }
-    if (allow_mismatched_build_id_) {
-      std::optional<std::string> s = SearchFileMapByPath(dso_path);
-      if (s.has_value()) {
-        return s.value();
-      }
+  }
+  if (allow_mismatched_build_id_) {
+    std::optional<std::string> s = SearchFileMapByPath(dso_path);
+    if (s.has_value()) {
+      return s.value();
     }
   }
   if (!symfs_dir_.empty()) {
@@ -226,8 +230,7 @@ std::optional<std::string> DebugElfFileFinder::SearchFileMapByPath(const std::st
   }
   std::string best_elf_file;
   size_t best_match_length = 0;
-  for (const auto& p : build_id_to_file_map_) {
-    const std::string& elf_file = p.second;
+  auto check_file = [&](const std::string& elf_file) {
     if (EndsWith(elf_file, filename)) {
       size_t i = elf_file.size();
       size_t j = path.size();
@@ -241,6 +244,13 @@ std::optional<std::string> DebugElfFileFinder::SearchFileMapByPath(const std::st
         best_match_length = match_length;
       }
     }
+  };
+
+  for (const auto& p : build_id_to_file_map_) {
+    check_file(p.second);
+  }
+  for (const auto& elf_file : no_build_id_files_) {
+    check_file(elf_file);
   }
   if (!best_elf_file.empty()) {
     LOG(INFO) << "Found " << best_elf_file << " for " << path << " by filename";
