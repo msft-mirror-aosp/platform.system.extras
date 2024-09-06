@@ -16,7 +16,12 @@
 
 import time
 from abc import ABC, abstractmethod
-from config_builder import PREDEFINED_PERFETTO_CONFIGS
+from config_builder import PREDEFINED_PERFETTO_CONFIGS, build_custom_config
+from open_ui import open_trace
+
+PERFETTO_TRACE_FILE = "/data/misc/perfetto-traces/trace.perfetto-trace"
+PERFETTO_WEB_UI_ADDRESS = "https://ui.perfetto.dev"
+PERFETTO_TRACE_START_DELAY_SECS = 0.5
 
 
 class CommandExecutor(ABC):
@@ -49,14 +54,16 @@ class ProfilerCommandExecutor(CommandExecutor):
     error = self.prepare_device(command, device, config)
     if error is not None:
       return error
+    host_file = None
     for run in range(1, command.runs + 1):
+      host_file = f"{command.out_dir}/trace.perfetto-trace-{run}"
       error = self.prepare_device_for_run(command, device, run)
       if error is not None:
         return error
       error = self.execute_run(command, device, config, run)
       if error is not None:
         return error
-      error = self.retrieve_perf_data(command, device)
+      error = self.retrieve_perf_data(command, device, host_file)
       if error is not None:
         return error
       if command.runs != run:
@@ -65,36 +72,61 @@ class ProfilerCommandExecutor(CommandExecutor):
     if error is not None:
       return error
     if command.use_ui:
-      return self.open_ui(command)
+      open_trace(host_file, PERFETTO_WEB_UI_ADDRESS)
     return None
 
   def create_config(self, command):
     if command.perfetto_config in PREDEFINED_PERFETTO_CONFIGS:
       return PREDEFINED_PERFETTO_CONFIGS[command.perfetto_config](command)
     else:
-      raise NotImplementedError
+      return build_custom_config(command)
 
   def prepare_device(self, command, device, config):
     return None
 
   def prepare_device_for_run(self, command, device, run):
-    return None
+    device.root_device()
+    device.remove_file(PERFETTO_TRACE_FILE)
 
   def execute_run(self, command, device, config, run):
     print("Performing run %s" % run)
-    return None
+    process = device.start_perfetto_trace(config)
+    time.sleep(PERFETTO_TRACE_START_DELAY_SECS)
+    error = self.trigger_system_event(command, device)
+    if error is not None:
+      return error
+    process.wait()
 
   def trigger_system_event(self, command, device):
     return None
 
-  def retrieve_perf_data(self, command, device):
-    return None
+  def retrieve_perf_data(self, command, device, host_file):
+    device.pull_file(PERFETTO_TRACE_FILE, host_file)
 
   def cleanup(self, command, device):
     return None
 
-  def open_ui(self, command):
-    return None
+
+class UserSwitchCommandExecutor(ProfilerCommandExecutor):
+
+  def prepare_device_for_run(self, command, device, run):
+    super().prepare_device_for_run(command, device, run)
+    current_user = device.get_current_user()
+    if command.from_user != current_user:
+      print("Switching from the current user, %s, to the from-user, %s."
+            % (current_user, command.from_user))
+      device.perform_user_switch(command.from_user)
+
+  def trigger_system_event(self, command, device):
+    print("Switching from the from-user, %s, to the to-user, %s."
+          % (command.from_user, command.to_user))
+    device.perform_user_switch(command.to_user)
+
+  def cleanup(self, command, device):
+    if device.get_current_user() != command.original_user:
+      print("Switching from the to-user, %s, back to the original user, %s."
+            % (command.to_user, command.original_user))
+      device.perform_user_switch(command.original_user)
 
 
 class HWCommandExecutor(CommandExecutor):
