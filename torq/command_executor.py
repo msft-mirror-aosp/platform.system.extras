@@ -16,10 +16,11 @@
 
 import time
 from abc import ABC, abstractmethod
-from config_builder import PREDEFINED_PERFETTO_CONFIGS
+from config_builder import PREDEFINED_PERFETTO_CONFIGS, build_custom_config
 from open_ui import open_trace
 
 PERFETTO_TRACE_FILE = "/data/misc/perfetto-traces/trace.perfetto-trace"
+PERFETTO_BOOT_TRACE_FILE = "/data/misc/perfetto-traces/boottrace.perfetto-trace"
 PERFETTO_WEB_UI_ADDRESS = "https://ui.perfetto.dev"
 PERFETTO_TRACE_START_DELAY_SECS = 0.5
 
@@ -79,7 +80,7 @@ class ProfilerCommandExecutor(CommandExecutor):
     if command.perfetto_config in PREDEFINED_PERFETTO_CONFIGS:
       return PREDEFINED_PERFETTO_CONFIGS[command.perfetto_config](command)
     else:
-      raise NotImplementedError
+      return build_custom_config(command)
 
   def prepare_device(self, command, device, config):
     return None
@@ -105,6 +106,55 @@ class ProfilerCommandExecutor(CommandExecutor):
 
   def cleanup(self, command, device):
     return None
+
+
+class UserSwitchCommandExecutor(ProfilerCommandExecutor):
+
+  def prepare_device_for_run(self, command, device, run):
+    super().prepare_device_for_run(command, device, run)
+    current_user = device.get_current_user()
+    if command.from_user != current_user:
+      print("Switching from the current user, %s, to the from-user, %s."
+            % (current_user, command.from_user))
+      device.perform_user_switch(command.from_user)
+
+  def trigger_system_event(self, command, device):
+    print("Switching from the from-user, %s, to the to-user, %s."
+          % (command.from_user, command.to_user))
+    device.perform_user_switch(command.to_user)
+
+  def cleanup(self, command, device):
+    if device.get_current_user() != command.original_user:
+      print("Switching from the to-user, %s, back to the original user, %s."
+            % (command.to_user, command.original_user))
+      device.perform_user_switch(command.original_user)
+
+
+class BootCommandExecutor(ProfilerCommandExecutor):
+
+  def prepare_device(self, command, device, config):
+    device.root_device()
+    device.write_to_file("/data/misc/perfetto-configs/boottrace.pbtxt", config)
+
+  def prepare_device_for_run(self, command, device, run):
+    device.remove_file(PERFETTO_BOOT_TRACE_FILE)
+    device.set_prop("persist.debug.perfetto.boottrace", "1")
+
+  def execute_run(self, command, device, config, run):
+    print("Performing run %s" % run)
+    self.trigger_system_event(command, device)
+    device.wait_for_device()
+    device.root_device()
+    dur_seconds = command.dur_ms / 1000
+    print("Tracing for %s seconds." % dur_seconds)
+    time.sleep(dur_seconds)
+    device.wait_for_boot_to_complete()
+
+  def trigger_system_event(self, command, device):
+    device.reboot()
+
+  def retrieve_perf_data(self, command, device, host_file):
+    device.pull_file(PERFETTO_BOOT_TRACE_FILE, host_file)
 
 
 class HWCommandExecutor(CommandExecutor):
