@@ -109,3 +109,8 @@ cc_binary {
     srcs: ["etm_test_loop.cpp"],
     ldflags: ["-Wl,-z,noseparate-code"],
 }
+
+cc_binary {
+    name: "autofdo_addr_test",
+    srcs: ["autofdo_addr_test.cpp"],
+}
