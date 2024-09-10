@@ -55,7 +55,7 @@ enum class OutputFormat {
 };
 
 struct AutoFDOBinaryInfo {
-  uint64_t first_load_segment_addr = 0;
+  std::vector<ElfSegment> executable_segments;
   std::unordered_map<uint64_t, uint64_t> address_count_map;
   std::unordered_map<AddrPair, uint64_t, AddrPairHash> range_count_map;
   std::unordered_map<AddrPair, uint64_t, AddrPairHash> branch_count_map;
@@ -101,22 +101,31 @@ struct AutoFDOBinaryInfo {
       }
     }
   }
+
+  std::optional<uint64_t> VaddrToOffset(uint64_t vaddr) const {
+    for (const auto& segment : executable_segments) {
+      if (segment.vaddr <= vaddr && vaddr < segment.vaddr + segment.file_size) {
+        return vaddr - segment.vaddr + segment.file_offset;
+      }
+    }
+    return std::nullopt;
+  }
 };
 
 using AutoFDOBinaryCallback = std::function<void(const BinaryKey&, AutoFDOBinaryInfo&)>;
 using ETMBinaryCallback = std::function<void(const BinaryKey&, ETMBinary&)>;
 using LBRDataCallback = std::function<void(LBRData&)>;
 
-static uint64_t GetFirstLoadSegmentVaddr(const Dso* dso) {
+static std::vector<ElfSegment> GetExecutableSegments(const Dso* dso) {
+  std::vector<ElfSegment> segments;
   ElfStatus status;
   if (auto elf = ElfFile::Open(dso->GetDebugFilePath(), &status); elf) {
-    for (const auto& segment : elf->GetProgramHeader()) {
-      if (segment.is_load) {
-        return segment.vaddr;
-      }
-    }
+    segments = elf->GetProgramHeader();
+    auto not_executable = [](const ElfSegment& s) { return !s.is_executable; };
+    segments.erase(std::remove_if(segments.begin(), segments.end(), not_executable),
+                   segments.end());
   }
-  return 0;
+  return segments;
 }
 
 // Base class for reading perf.data and generating AutoFDO or branch list data.
@@ -188,7 +197,7 @@ class PerfDataReader {
     for (auto& p : autofdo_binary_map_) {
       const Dso* dso = p.first;
       AutoFDOBinaryInfo& binary = p.second;
-      binary.first_load_segment_addr = GetFirstLoadSegmentVaddr(dso);
+      binary.executable_segments = GetExecutableSegments(dso);
       autofdo_callback_(BinaryKey(dso, 0), binary);
     }
   }
@@ -605,7 +614,7 @@ class ETMBranchListToAutoFDOConverter {
       return nullptr;
     }
     std::unique_ptr<AutoFDOBinaryInfo> autofdo_binary(new AutoFDOBinaryInfo);
-    autofdo_binary->first_load_segment_addr = GetFirstLoadSegmentVaddr(dso.get());
+    autofdo_binary->executable_segments = GetExecutableSegments(dso.get());
 
     if (dso->type() == DSO_KERNEL) {
       ModifyBranchMapForKernel(dso.get(), key.kernel_start_addr, binary);
@@ -686,16 +695,17 @@ class AutoFDOWriter {
     }
     for (const auto& key : keys) {
       const AutoFDOBinaryInfo& binary = binary_map_[key];
-      // AutoFDO text format needs file_offsets instead of virtual addrs in a binary. And it uses
-      // below formula: vaddr = file_offset + GetFirstLoadSegmentVaddr().
-      uint64_t base_addr = binary.first_load_segment_addr;
+      // AutoFDO text format needs file_offsets instead of virtual addrs in a binary. So convert
+      // vaddrs to file offsets.
 
       // Write range_count_map. Sort the output by addrs.
       std::vector<std::pair<AddrPair, uint64_t>> range_counts;
       for (std::pair<AddrPair, uint64_t> p : binary.range_count_map) {
-        if (p.first.first >= base_addr && p.first.second >= base_addr) {
-          p.first.first -= base_addr;
-          p.first.second -= base_addr;
+        std::optional<uint64_t> start_offset = binary.VaddrToOffset(p.first.first);
+        std::optional<uint64_t> end_offset = binary.VaddrToOffset(p.first.second);
+        if (start_offset && end_offset) {
+          p.first.first = start_offset.value();
+          p.first.second = end_offset.value();
           range_counts.emplace_back(p);
         }
       }
@@ -709,8 +719,9 @@ class AutoFDOWriter {
       // Write addr_count_map. Sort the output by addrs.
       std::vector<std::pair<uint64_t, uint64_t>> address_counts;
       for (std::pair<uint64_t, uint64_t> p : binary.address_count_map) {
-        if (p.first >= base_addr) {
-          p.first -= base_addr;
+        std::optional<uint64_t> offset = binary.VaddrToOffset(p.first);
+        if (offset) {
+          p.first = offset.value();
           address_counts.emplace_back(p);
         }
       }
@@ -723,9 +734,11 @@ class AutoFDOWriter {
       // Write branch_count_map. Sort the output by addrs.
       std::vector<std::pair<AddrPair, uint64_t>> branch_counts;
       for (std::pair<AddrPair, uint64_t> p : binary.branch_count_map) {
-        if (p.first.first >= base_addr) {
-          p.first.first -= base_addr;
-          p.first.second = (p.first.second >= base_addr) ? (p.first.second - base_addr) : 0;
+        std::optional<uint64_t> from_offset = binary.VaddrToOffset(p.first.first);
+        std::optional<uint64_t> to_offset = binary.VaddrToOffset(p.first.second);
+        if (from_offset) {
+          p.first.first = from_offset.value();
+          p.first.second = to_offset ? to_offset.value() : 0;
           branch_counts.emplace_back(p);
         }
       }
@@ -844,6 +857,7 @@ class InjectCommand : public Command {
 "--dump-etm type1,type2,...   Dump etm data. A type is one of raw, packet and element.\n"
 "--exclude-perf               Exclude trace data for the recording process.\n"
 "--symdir <dir>               Look for binaries in a directory recursively.\n"
+"--allow-mismatched-build-id  Allow mismatched build ids when searching for debug binaries.\n"
 "\n"
 "Examples:\n"
 "1. Generate autofdo text output.\n"
@@ -882,6 +896,7 @@ class InjectCommand : public Command {
  private:
   bool ParseOptions(const std::vector<std::string>& args) {
     const OptionFormatMap option_formats = {
+        {"--allow-mismatched-build-id", {OptionValueType::NONE, OptionType::SINGLE}},
         {"--binary", {OptionValueType::STRING, OptionType::SINGLE}},
         {"--dump-etm", {OptionValueType::STRING, OptionType::SINGLE}},
         {"--exclude-perf", {OptionValueType::NONE, OptionType::SINGLE}},
@@ -896,6 +911,9 @@ class InjectCommand : public Command {
       return false;
     }
 
+    if (options.PullBoolValue("--allow-mismatched-build-id")) {
+      Dso::AllowMismatchedBuildId();
+    }
     if (auto value = options.PullValue("--binary"); value) {
       binary_name_regex_ = RegEx::Create(value->str_value);
       if (binary_name_regex_ == nullptr) {
@@ -936,9 +954,11 @@ class InjectCommand : public Command {
         return false;
       }
     }
-    if (auto value = options.PullValue("--symdir"); value) {
-      if (!Dso::AddSymbolDir(value->str_value)) {
-        return false;
+    if (std::vector<OptionValue> values = options.PullValues("--symdir"); !values.empty()) {
+      for (const OptionValue& value : values) {
+        if (!Dso::AddSymbolDir(value.str_value)) {
+          return false;
+        }
       }
       // Symbol dirs are cleaned when Dso count is decreased to zero, which can happen between
       // processing input files. To make symbol dirs always available, create a placeholder dso to
@@ -1062,7 +1082,14 @@ class InjectCommand : public Command {
         return false;
       }
       for (size_t i = 0; i < binaries.value().size(); ++i) {
-        autofdo_writer.AddAutoFDOBinary(lbr_data.binaries[i], binaries.value()[i]);
+        BinaryKey& key = lbr_data.binaries[i];
+        AutoFDOBinaryInfo& binary = binaries.value()[i];
+        std::unique_ptr<Dso> dso = Dso::CreateDsoWithBuildId(DSO_ELF_FILE, key.path, key.build_id);
+        if (!dso) {
+          continue;
+        }
+        binary.executable_segments = GetExecutableSegments(dso.get());
+        autofdo_writer.AddAutoFDOBinary(key, binary);
       }
     }
 
