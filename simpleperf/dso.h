@@ -57,6 +57,7 @@ class DebugElfFileFinder {
   std::string vdso_32bit_;
   std::string symfs_dir_;
   std::unordered_map<std::string, std::string> build_id_to_file_map_;
+  std::vector<std::string> no_build_id_files_;
 };
 
 }  // namespace simpleperf_dso_impl
