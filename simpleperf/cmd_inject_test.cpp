@@ -296,4 +296,7 @@ TEST(cmd_inject, inject_small_binary) {
   std::string perf_data = GetTestData("etm/perf_for_small_binary.data");
   ASSERT_TRUE(RunInjectCmd({"-i", perf_data}, &data));
   CheckMatchingExpectedData("perf_inject_small.data", data);
+
+  ASSERT_TRUE(RunInjectCmd({"-i", perf_data, "--output", "bolt"}, &data));
+  CheckMatchingExpectedData("perf_inject_small_bolt.data", data);
 }
