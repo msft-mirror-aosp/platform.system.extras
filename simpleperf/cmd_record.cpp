@@ -2041,7 +2041,13 @@ bool RecordCommand::DumpAdditionalFeatures(const std::vector<std::string>& args)
     }
   }
 
-  if (!event_selection_set_.HasAuxTrace() && !record_file_writer_->ReadDataSection(callback)) {
+  // We don't need to read data section when recording ETM data and not need to dump build ids.
+  bool read_data_section = true;
+  if (event_selection_set_.HasAuxTrace() && !dump_build_id_) {
+    read_data_section = false;
+  }
+
+  if (read_data_section && !record_file_writer_->ReadDataSection(callback)) {
     return false;
   }
 
