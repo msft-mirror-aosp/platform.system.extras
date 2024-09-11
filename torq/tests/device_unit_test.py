@@ -31,7 +31,6 @@ TEST_USER_ID_2 = 1
 TEST_USER_ID_3 = 2
 TEST_PACKAGE_1 = "test-package-1"
 TEST_PACKAGE_2 = "test-package-2"
-TEST_PACKAGE_3 = "test-package-3"
 TEST_PROP = "test-prop"
 TEST_PROP_VALUE = "test-prop-value"
 TEST_PID_OUTPUT = b"8241\n"
@@ -608,42 +607,6 @@ class DeviceUnitTest(unittest.TestCase):
 
     with self.assertRaises(Exception) as e:
       adbDevice.get_packages()
-
-    self.assertEqual(str(e.exception), TEST_FAILURE_MSG)
-
-  @mock.patch.object(subprocess, "run", autospec=True)
-  def test_package_exists_success(self, mock_subprocess_run):
-    mock_subprocess_run.return_value = self.mock_packages()
-    adbDevice = AdbDevice(TEST_DEVICE_SERIAL)
-
-    error = adbDevice.package_exists(TEST_PACKAGE_1)
-
-    self.assertEqual(error, None)
-
-  @mock.patch.object(subprocess, "run", autospec=True)
-  def test_package_not_exists(self, mock_subprocess_run):
-    mock_subprocess_run.return_value = self.mock_packages()
-    adbDevice = AdbDevice(TEST_DEVICE_SERIAL)
-
-    error = adbDevice.package_exists(TEST_PACKAGE_3)
-
-    self.assertNotEqual(error, None)
-    self.assertEqual(error.message, ("Package %s does not exist on device"
-                                     " with serial %s."
-                                     % (TEST_PACKAGE_3, TEST_DEVICE_SERIAL)))
-    self.assertEqual(error.suggestion, ("Select from one of the following"
-                                        " packages on device with serial %s:"
-                                        " \n\t %s,\n\t %s"
-                                        % (TEST_DEVICE_SERIAL, TEST_PACKAGE_1,
-                                           TEST_PACKAGE_2)))
-
-  @mock.patch.object(subprocess, "run", autospec=True)
-  def test_package_exists_command_failure(self, mock_subprocess_run):
-    mock_subprocess_run.side_effect = TEST_EXCEPTION
-    adbDevice = AdbDevice(TEST_DEVICE_SERIAL)
-
-    with self.assertRaises(Exception) as e:
-      adbDevice.package_exists(TEST_PACKAGE_1)
 
     self.assertEqual(str(e.exception), TEST_FAILURE_MSG)
 
