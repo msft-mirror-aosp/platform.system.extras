@@ -423,8 +423,7 @@ def create_config_command(args):
   command = None
   type = "config " + args.config_subcommand
   if args.config_subcommand == "pull":
-    command = ConfigCommand(type, args.config_name,
-                            args.file_path)
+    command = ConfigCommand(type, args.config_name, args.file_path)
   if args.config_subcommand == "show":
     command = ConfigCommand(type, args.config_name, None)
   if args.config_subcommand == "list":

@@ -36,6 +36,7 @@ class CommandExecutor(ABC):
     error = device.check_device_connection()
     if error is not None:
       return error
+    device.root_device()
     error = command.validate(device)
     if error is not None:
       return error
@@ -86,7 +87,6 @@ class ProfilerCommandExecutor(CommandExecutor):
     return None
 
   def prepare_device_for_run(self, command, device, run):
-    device.root_device()
     device.remove_file(PERFETTO_TRACE_FILE)
 
   def execute_run(self, command, device, config, run):
@@ -134,7 +134,6 @@ class UserSwitchCommandExecutor(ProfilerCommandExecutor):
 class BootCommandExecutor(ProfilerCommandExecutor):
 
   def prepare_device(self, command, device, config):
-    device.root_device()
     device.write_to_file("/data/misc/perfetto-configs/boottrace.pbtxt", config)
 
   def prepare_device_for_run(self, command, device, run):
