@@ -57,7 +57,7 @@ class ProfilerCommandExecutor(CommandExecutor):
       return error
     host_file = None
     for run in range(1, command.runs + 1):
-      host_file = f"{command.out_dir}/trace.perfetto-trace-{run}"
+      host_file = f"{command.out_dir}/trace-{run}.perfetto-trace"
       error = self.prepare_device_for_run(command, device, run)
       if error is not None:
         return error
@@ -95,6 +95,7 @@ class ProfilerCommandExecutor(CommandExecutor):
     time.sleep(PERFETTO_TRACE_START_DELAY_SECS)
     error = self.trigger_system_event(command, device)
     if error is not None:
+      device.kill_pid("perfetto")
       return error
     process.wait()
 
@@ -155,6 +156,18 @@ class BootCommandExecutor(ProfilerCommandExecutor):
 
   def retrieve_perf_data(self, command, device, host_file):
     device.pull_file(PERFETTO_BOOT_TRACE_FILE, host_file)
+
+
+class AppStartupCommandExecutor(ProfilerCommandExecutor):
+
+  def execute_run(self, command, device, config, run):
+    error = super().execute_run(command, device, config, run)
+    if error is not None:
+      return error
+    device.force_stop_package(command.app)
+
+  def trigger_system_event(self, command, device):
+    return device.start_package(command.app)
 
 
 class HWCommandExecutor(CommandExecutor):
