@@ -165,16 +165,6 @@ class AdbDevice:
         ["adb", "-s", self.serial, "shell", "pm", "list", "packages"],
         capture_output=True).stdout.decode("utf-8").splitlines()]
 
-  def package_exists(self, package):
-    packages = self.get_packages()
-    if package in packages:
-      return None
-    return ValidationError(("Package %s does not exist on device with serial"
-                            " %s." % (package, self.serial)),
-                           ("Select from one of the following packages on"
-                            " device with serial %s: \n\t %s"
-                            % (self.serial, (",\n\t ".join(packages)))))
-
   def get_pid(self, package):
     return subprocess.run("adb -s %s shell pidof %s" % (self.serial, package),
                           shell=True, capture_output=True
