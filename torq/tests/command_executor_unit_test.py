@@ -42,7 +42,8 @@ class ProfilerCommandExecutorUnitTest(unittest.TestCase):
   def setUp(self):
     self.command = ProfilerCommand(
         PROFILER_COMMAND_TYPE, "custom", None, DEFAULT_OUT_DIR, DEFAULT_DUR_MS,
-        None, 1, None, DEFAULT_PERFETTO_CONFIG, None, False, [], [], None, None)
+        None, 1, None, DEFAULT_PERFETTO_CONFIG, None, False, None, None, None,
+        None)
     self.mock_device = mock.create_autospec(AdbDevice, instance=True,
                                             serial=TEST_SERIAL)
     self.mock_device.check_device_connection.return_value = None
@@ -69,6 +70,15 @@ class ProfilerCommandExecutorUnitTest(unittest.TestCase):
 
   def test_execute_check_device_connection_failure(self):
     self.mock_device.check_device_connection.side_effect = TEST_EXCEPTION
+
+    with self.assertRaises(Exception) as e:
+      self.command.execute(self.mock_device)
+
+    self.assertEqual(str(e.exception), TEST_ERROR_MSG)
+    self.assertEqual(self.mock_device.pull_file.call_count, 0)
+
+  def test_execute_root_device_failure(self):
+    self.mock_device.root_device.side_effect = TEST_EXCEPTION
 
     with self.assertRaises(Exception) as e:
       self.command.execute(self.mock_device)
@@ -171,15 +181,6 @@ class ProfilerCommandExecutorUnitTest(unittest.TestCase):
                                         " workqueue/*"))
     self.assertEqual(self.mock_device.pull_file.call_count, 0)
 
-  def test_execute_root_device_failure(self):
-    self.mock_device.root_device.side_effect = TEST_EXCEPTION
-
-    with self.assertRaises(Exception) as e:
-      self.command.execute(self.mock_device)
-
-    self.assertEqual(str(e.exception), TEST_ERROR_MSG)
-    self.assertEqual(self.mock_device.pull_file.call_count, 0)
-
   def test_execute_remove_file_failure(self):
     self.mock_device.remove_file.side_effect = TEST_EXCEPTION
 
@@ -229,8 +230,8 @@ class UserSwitchCommandExecutorUnitTest(unittest.TestCase):
   def setUp(self):
     self.command = ProfilerCommand(
         PROFILER_COMMAND_TYPE, "user-switch", None, DEFAULT_OUT_DIR,
-        DEFAULT_DUR_MS, None, 1, None, DEFAULT_PERFETTO_CONFIG, None, False, [],
-        [], None, None)
+        DEFAULT_DUR_MS, None, 1, None, DEFAULT_PERFETTO_CONFIG, None, False,
+        None, None, None, None)
     self.mock_device = mock.create_autospec(AdbDevice, instance=True,
                                             serial=TEST_SERIAL)
     self.mock_device.check_device_connection.return_value = None
@@ -352,8 +353,8 @@ class BootCommandExecutorUnitTest(unittest.TestCase):
   def setUp(self):
     self.command = ProfilerCommand(
         PROFILER_COMMAND_TYPE, "boot", None, DEFAULT_OUT_DIR, TEST_DURATION,
-        None, 1, None, DEFAULT_PERFETTO_CONFIG, TEST_DURATION, False, [], [],
-        None, None)
+        None, 1, None, DEFAULT_PERFETTO_CONFIG, TEST_DURATION, False, None,
+        None, None, None)
     self.mock_device = mock.create_autospec(AdbDevice, instance=True,
                                             serial=TEST_SERIAL)
     self.mock_device.check_device_connection.return_value = None
@@ -382,16 +383,6 @@ class BootCommandExecutorUnitTest(unittest.TestCase):
 
     self.assertEqual(str(e.exception), TEST_ERROR_MSG)
     self.assertEqual(self.mock_device.reboot.call_count, 1)
-    self.assertEqual(self.mock_device.pull_file.call_count, 0)
-
-  def test_execute_root_device_failure(self):
-    self.mock_device.root_device.side_effect = TEST_EXCEPTION
-
-    with self.assertRaises(Exception) as e:
-      self.command.execute(self.mock_device)
-
-    self.assertEqual(str(e.exception), TEST_ERROR_MSG)
-    self.assertEqual(self.mock_device.reboot.call_count, 0)
     self.assertEqual(self.mock_device.pull_file.call_count, 0)
 
   def test_execute_write_to_file_failure(self):
@@ -426,6 +417,16 @@ class BootCommandExecutorUnitTest(unittest.TestCase):
 
   def test_execute_wait_for_device_failure(self):
     self.mock_device.wait_for_device.side_effect = TEST_EXCEPTION
+
+    with self.assertRaises(Exception) as e:
+      self.command.execute(self.mock_device)
+
+    self.assertEqual(str(e.exception), TEST_ERROR_MSG)
+    self.assertEqual(self.mock_device.reboot.call_count, 1)
+    self.assertEqual(self.mock_device.pull_file.call_count, 0)
+
+  def test_execute_second_root_device_failure(self):
+    self.mock_device.root_device.side_effect = [None, TEST_EXCEPTION]
 
     with self.assertRaises(Exception) as e:
       self.command.execute(self.mock_device)

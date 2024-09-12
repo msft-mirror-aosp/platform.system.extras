@@ -102,6 +102,7 @@ class ProfilerCommand(Command):
                              % (self.to_user, device.serial, self.from_user),
                              "Choose a --to-user ID that is different than"
                              " the --from-user ID.")
+    return None
 
   def validate_app_startup(self, device):
     packages = device.get_packages()
