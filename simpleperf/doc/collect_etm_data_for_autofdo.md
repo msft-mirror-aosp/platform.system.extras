@@ -199,9 +199,13 @@ The binaries should have an unstripped symbol table, and linked with relocations
 # Remove the comment line.
 (host) $ sed -i '1d' perf_inject_bolt.data
 (host) $ <LLVM_BIN>/perf2bolt --pa -p=perf_inject_bolt.data -o perf.fdata symdir/etm_test_loop
+# --no-huge-pages and --align-text=0x4000 are used to avoid generating big binaries due to
+# alignment. See https://github.com/facebookarchive/BOLT/issues/138.
+# However, if the original binary is built with huge page alignments (-z max-page-size=0x200000),
+# then don't use these flags.
 (host) $ <LLVM_BIN>/llvm-bolt symdir/etm_test_loop -o etm_test_loop.bolt -data=perf.fdata \
          -reorder-blocks=ext-tsp -reorder-functions=hfsort -split-functions -split-all-cold \
-         -split-eh -dyno-stats
+         -split-eh -dyno-stats --no-huge-pages --align-text=0x4000
 ```
 
 ## Collect ETM data with a daemon
