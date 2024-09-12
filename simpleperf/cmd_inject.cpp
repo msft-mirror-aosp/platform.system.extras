@@ -779,25 +779,17 @@ class AutoFDOWriter {
       fprintf(output_fp.get(),
               "// Please split this file. BOLT only accepts profile for one binary.\n");
     }
+
     for (const auto& key : keys) {
       const AutoFDOBinaryInfo& binary = binary_map_[key];
-      // Bolt text format needs file_offsets instead of virtual addrs in a binary. So convert
-      // vaddrs to file offsets.
-
       // Write the binary path in comment.
       fprintf(output_fp.get(), "// build_id: %s, %s\n", key.build_id.ToString().c_str(),
               key.path.c_str());
 
       // Write range_count_map. Sort the output by addrs.
       std::vector<std::pair<AddrPair, uint64_t>> range_counts;
-      for (std::pair<AddrPair, uint64_t> p : binary.range_count_map) {
-        std::optional<uint64_t> start_offset = binary.VaddrToOffset(p.first.first);
-        std::optional<uint64_t> end_offset = binary.VaddrToOffset(p.first.second);
-        if (start_offset && end_offset) {
-          p.first.first = start_offset.value();
-          p.first.second = end_offset.value();
-          range_counts.emplace_back(p);
-        }
+      for (const auto& p : binary.range_count_map) {
+        range_counts.emplace_back(p);
       }
       std::sort(range_counts.begin(), range_counts.end());
       for (const auto& p : range_counts) {
@@ -807,14 +799,8 @@ class AutoFDOWriter {
 
       // Write branch_count_map. Sort the output by addrs.
       std::vector<std::pair<AddrPair, uint64_t>> branch_counts;
-      for (std::pair<AddrPair, uint64_t> p : binary.branch_count_map) {
-        std::optional<uint64_t> from_offset = binary.VaddrToOffset(p.first.first);
-        std::optional<uint64_t> to_offset = binary.VaddrToOffset(p.first.second);
-        if (from_offset) {
-          p.first.first = from_offset.value();
-          p.first.second = to_offset ? to_offset.value() : 0;
-          branch_counts.emplace_back(p);
-        }
+      for (const auto& p : binary.branch_count_map) {
+        branch_counts.emplace_back(p);
       }
       std::sort(branch_counts.begin(), branch_counts.end());
       for (const auto& p : branch_counts) {
