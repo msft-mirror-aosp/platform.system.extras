@@ -306,9 +306,17 @@ def verify_args(args):
   if args.ui is None:
     args.ui = args.runs == 1
 
-  if (args.subcommands == "config" and args.config_subcommand == "pull" and
-      args.file_path is None):
-    args.file_path = "./" + args.config_name + ".pbtxt"
+  if args.subcommands == "config" and args.config_subcommand == "pull":
+    if args.file_path is None:
+      args.file_path = "./" + args.config_name + ".pbtxt"
+    elif not os.path.isfile(args.file_path):
+      return None, ValidationError(
+          ("Command is invalid because %s is not a valid filepath."
+           % args.file_path),
+          ("A default filepath can be used if you do not specify a file-path:\n"
+           "\t torq pull default to copy to ./default.pbtxt\n"
+           "\t torq pull lightweight to copy to ./lightweight.pbtxt\n"
+           "\t torq pull memory to copy to ./memory.pbtxt"))
 
   return args, None
 
