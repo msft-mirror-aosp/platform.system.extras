@@ -20,6 +20,7 @@ import time
 from validation_error import ValidationError
 
 ADB_ROOT_TIMED_OUT_LIMIT_SECS = 5
+ADB_BOOT_COMPLETED_TIMED_OUT_LIMIT_SECS = 30
 POLLING_INTERVAL_SECS = 0.5
 
 
@@ -133,6 +134,64 @@ class AdbDevice:
     subprocess.run(["adb", "-s", self.serial, "shell", "am", "switch-user",
                     str(user)])
 
+  def write_to_file(self, file_path, host_file_string):
+    subprocess.run(("adb -s %s shell 'cat > %s %s'"
+                    % (self.serial, file_path, host_file_string)), shell=True)
+
+  def set_prop(self, prop, value):
+    subprocess.run(["adb", "-s", self.serial, "shell", "setprop", prop, value])
+
+  def reboot(self):
+    subprocess.run(["adb", "-s", self.serial, "reboot"])
+
+  def wait_for_device(self):
+    subprocess.run(["adb", "-s", self.serial, "wait-for-device"])
+
+  def is_boot_completed(self):
+    command_output = subprocess.run(["adb", "-s", self.serial, "shell",
+                                     "getprop", "sys.boot_completed"],
+                                    capture_output=True)
+    return command_output.stdout.decode("utf-8").strip() == "1"
+
+  def wait_for_boot_to_complete(self):
+    if not self.poll_is_task_completed(ADB_BOOT_COMPLETED_TIMED_OUT_LIMIT_SECS,
+                                       POLLING_INTERVAL_SECS,
+                                       self.is_boot_completed):
+      raise Exception(("Device with serial %s took too long to finish"
+                       " rebooting." % self.serial))
+
+  def get_packages(self):
+    return [package.removeprefix("package:") for package in subprocess.run(
+        ["adb", "-s", self.serial, "shell", "pm", "list", "packages"],
+        capture_output=True).stdout.decode("utf-8").splitlines()]
+
+  def get_pid(self, package):
+    return subprocess.run("adb -s %s shell pidof %s" % (self.serial, package),
+                          shell=True, capture_output=True
+                          ).stdout.decode("utf-8").split("\n")[0]
+
+  def is_package_running(self, package):
+    return self.get_pid(package) != ""
+
+  def start_package(self, package):
+    if subprocess.run(
+        ["adb", "-s", self.serial, "shell", "am", "start", package],
+        capture_output=True).stderr.decode("utf-8").split("\n")[0] != "":
+      return ValidationError(("Cannot start package %s on device with"
+                              " serial %s because %s is a service package,"
+                              " which doesn't implement a MAIN activity."
+                              % (package, self.serial, package)), None)
+    return None
+
+  def kill_pid(self, package):
+    pid = self.get_pid(package)
+    if pid != "":
+      subprocess.run(["adb", "-s", self.serial, "shell", "kill", "-9", pid])
+
+  def force_stop_package(self, package):
+    subprocess.run(["adb", "-s", self.serial, "shell", "am", "force-stop",
+                    package])
+
   def get_num_cpus(self):
     raise NotImplementedError
 
@@ -152,9 +211,6 @@ class AdbDevice:
     raise NotImplementedError
 
   def set_memory(self, memory):
-    raise NotImplementedError
-
-  def app_exists(self, app):
     raise NotImplementedError
 
   def simpleperf_event_exists(self, simpleperf_event):
