@@ -102,6 +102,9 @@ TEST(cmd_inject, output_option) {
   std::string autofdo_data;
   ASSERT_TRUE(RunInjectCmd({"-i", tmpfile.path, "--output", "autofdo"}, &autofdo_data));
   CheckMatchingExpectedData("perf_inject.data", autofdo_data);
+  std::string bolt_data;
+  ASSERT_TRUE(RunInjectCmd({"-i", tmpfile.path, "--output", "bolt"}, &bolt_data));
+  CheckMatchingExpectedData("perf_inject_bolt.data", bolt_data);
 }
 
 // @CddTest = 6.1/C-0-2
@@ -293,4 +296,7 @@ TEST(cmd_inject, inject_small_binary) {
   std::string perf_data = GetTestData("etm/perf_for_small_binary.data");
   ASSERT_TRUE(RunInjectCmd({"-i", perf_data}, &data));
   CheckMatchingExpectedData("perf_inject_small.data", data);
+
+  ASSERT_TRUE(RunInjectCmd({"-i", perf_data, "--output", "bolt"}, &data));
+  CheckMatchingExpectedData("perf_inject_small_bolt.data", data);
 }
