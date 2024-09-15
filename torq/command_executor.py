@@ -36,6 +36,7 @@ class CommandExecutor(ABC):
     error = device.check_device_connection()
     if error is not None:
       return error
+    device.root_device()
     error = command.validate(device)
     if error is not None:
       return error
@@ -57,7 +58,7 @@ class ProfilerCommandExecutor(CommandExecutor):
       return error
     host_file = None
     for run in range(1, command.runs + 1):
-      host_file = f"{command.out_dir}/trace.perfetto-trace-{run}"
+      host_file = f"{command.out_dir}/trace-{run}.perfetto-trace"
       error = self.prepare_device_for_run(command, device, run)
       if error is not None:
         return error
@@ -86,7 +87,6 @@ class ProfilerCommandExecutor(CommandExecutor):
     return None
 
   def prepare_device_for_run(self, command, device, run):
-    device.root_device()
     device.remove_file(PERFETTO_TRACE_FILE)
 
   def execute_run(self, command, device, config, run):
@@ -95,6 +95,7 @@ class ProfilerCommandExecutor(CommandExecutor):
     time.sleep(PERFETTO_TRACE_START_DELAY_SECS)
     error = self.trigger_system_event(command, device)
     if error is not None:
+      device.kill_pid("perfetto")
       return error
     process.wait()
 
@@ -133,7 +134,6 @@ class UserSwitchCommandExecutor(ProfilerCommandExecutor):
 class BootCommandExecutor(ProfilerCommandExecutor):
 
   def prepare_device(self, command, device, config):
-    device.root_device()
     device.write_to_file("/data/misc/perfetto-configs/boottrace.pbtxt", config)
 
   def prepare_device_for_run(self, command, device, run):
@@ -155,6 +155,18 @@ class BootCommandExecutor(ProfilerCommandExecutor):
 
   def retrieve_perf_data(self, command, device, host_file):
     device.pull_file(PERFETTO_BOOT_TRACE_FILE, host_file)
+
+
+class AppStartupCommandExecutor(ProfilerCommandExecutor):
+
+  def execute_run(self, command, device, config, run):
+    error = super().execute_run(command, device, config, run)
+    if error is not None:
+      return error
+    device.force_stop_package(command.app)
+
+  def trigger_system_event(self, command, device):
+    return device.start_package(command.app)
 
 
 class HWCommandExecutor(CommandExecutor):
