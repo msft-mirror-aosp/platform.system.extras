@@ -197,7 +197,7 @@ The binaries should have an unstripped symbol table, and linked with relocations
 # symdir is the directory containting etm_test_loop with unstripped symbol table and relocations.
 (host) $ simpleperf inject -i perf.data --output bolt -o perf_inject_bolt.data --symdir symdir
 # Remove the comment line.
-(host) $ sed -i '1d' perf_inject_bolt.data
+(host) $ sed -i '/^\/\//d' perf_inject_bolt.data
 (host) $ <LLVM_BIN>/perf2bolt --pa -p=perf_inject_bolt.data -o perf.fdata symdir/etm_test_loop
 # --no-huge-pages and --align-text=0x4000 are used to avoid generating big binaries due to
 # alignment. See https://github.com/facebookarchive/BOLT/issues/138.
