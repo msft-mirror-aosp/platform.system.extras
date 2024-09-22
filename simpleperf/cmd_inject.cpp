@@ -782,10 +782,6 @@ class AutoFDOWriter {
 
     for (const auto& key : keys) {
       const AutoFDOBinaryInfo& binary = binary_map_[key];
-      // Write the binary path in comment.
-      fprintf(output_fp.get(), "// build_id: %s, %s\n", key.build_id.ToString().c_str(),
-              key.path.c_str());
-
       // Write range_count_map. Sort the output by addrs.
       std::vector<std::pair<AddrPair, uint64_t>> range_counts;
       for (const auto& p : binary.range_count_map) {
@@ -807,6 +803,10 @@ class AutoFDOWriter {
         fprintf(output_fp.get(), "B %" PRIx64 " %" PRIx64 " %" PRIu64 " 0\n", p.first.first,
                 p.first.second, p.second);
       }
+
+      // Write the binary path in comment.
+      fprintf(output_fp.get(), "// build_id: %s\n", key.build_id.ToString().c_str());
+      fprintf(output_fp.get(), "// %s\n", key.path.c_str());
     }
     return true;
   }
