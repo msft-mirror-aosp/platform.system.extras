@@ -28,6 +28,7 @@
 #include "BranchListFile.h"
 #include "ETMDecoder.h"
 #include "RegEx.h"
+#include "ZstdUtil.h"
 #include "command.h"
 #include "record_file.h"
 #include "system/extras/simpleperf/branch_list.pb.h"
@@ -525,6 +526,11 @@ class BranchListReader {
       PLOG(ERROR) << "failed to read " << filename_;
       return false;
     }
+    if (android::base::EndsWith(filename_, ".zst")) {
+      if (!ZstdDecompress(s.data(), s.size(), s)) {
+        return false;
+      }
+    }
     ETMBinaryMap etm_data;
     LBRData lbr_data;
     if (!ParseBranchListData(s, etm_data, lbr_data)) {
@@ -869,7 +875,7 @@ struct BranchListMerger {
 
 // Write branch lists to a protobuf file specified by branch_list.proto.
 static bool WriteBranchListFile(const std::string& output_filename, const ETMBinaryMap& etm_data,
-                                const LBRData& lbr_data) {
+                                const LBRData& lbr_data, bool compress) {
   std::string s;
   if (!etm_data.empty()) {
     if (!ETMBinaryMapToString(etm_data, s)) {
@@ -884,6 +890,9 @@ static bool WriteBranchListFile(const std::string& output_filename, const ETMBin
     LOG(INFO) << "Skip empty output file.";
     unlink(output_filename.c_str());
     return true;
+  }
+  if (compress && !ZstdCompress(s.data(), s.size(), s)) {
+    return false;
   }
   if (!android::base::WriteStringToFile(s, output_filename)) {
     PLOG(ERROR) << "failed to write to " << output_filename;
@@ -914,6 +923,7 @@ class InjectCommand : public Command {
 "--exclude-perf               Exclude trace data for the recording process.\n"
 "--symdir <dir>               Look for binaries in a directory recursively.\n"
 "--allow-mismatched-build-id  Allow mismatched build ids when searching for debug binaries.\n"
+"-z                           Compress branch-list output\n"
 "\n"
 "Examples:\n"
 "1. Generate autofdo text output.\n"
@@ -964,6 +974,7 @@ class InjectCommand : public Command {
         {"-o", {OptionValueType::STRING, OptionType::SINGLE}},
         {"--output", {OptionValueType::STRING, OptionType::SINGLE}},
         {"--symdir", {OptionValueType::STRING, OptionType::MULTIPLE}},
+        {"-z", {OptionValueType::NONE, OptionType::SINGLE}},
     };
     OptionValueMap options;
     std::vector<std::pair<OptionName, OptionValue>> ordered_options;
@@ -1027,7 +1038,13 @@ class InjectCommand : public Command {
       // prevent cleaning from happening.
       placeholder_dso_ = Dso::CreateDso(DSO_UNKNOWN_FILE, "unknown");
     }
+    compress_ = options.PullBoolValue("-z");
     CHECK(options.values.empty());
+
+    if (compress_ && !android::base::EndsWith(output_filename_, ".zst")) {
+      LOG(ERROR) << "When -z is used, output filename should has a .zst suffix";
+      return false;
+    }
     return true;
   }
 
@@ -1109,7 +1126,8 @@ class InjectCommand : public Command {
     if (!ReadPerfDataFiles(reader_callback)) {
       return false;
     }
-    return WriteBranchListFile(output_filename_, merger.GetETMData(), merger.GetLBRData());
+    return WriteBranchListFile(output_filename_, merger.GetETMData(), merger.GetLBRData(),
+                               compress_);
   }
 
   bool ConvertBranchListToAutoFDO() {
@@ -1183,7 +1201,8 @@ class InjectCommand : public Command {
       }
     }
     // Step2: Write ETMBinary.
-    return WriteBranchListFile(output_filename_, merger.GetETMData(), merger.GetLBRData());
+    return WriteBranchListFile(output_filename_, merger.GetETMData(), merger.GetLBRData(),
+                               compress_);
   }
 
   std::unique_ptr<RegEx> binary_name_regex_;
@@ -1192,6 +1211,7 @@ class InjectCommand : public Command {
   std::string output_filename_ = "perf_inject.data";
   OutputFormat output_format_ = OutputFormat::AutoFDO;
   ETMDumpOption etm_dump_option_;
+  bool compress_ = false;
 
   std::unique_ptr<Dso> placeholder_dso_;
 };
