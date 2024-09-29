@@ -108,6 +108,19 @@ TEST(cmd_inject, output_option) {
 }
 
 // @CddTest = 6.1/C-0-2
+TEST(cmd_inject, compress_option) {
+  TemporaryFile tmpfile;
+  close(tmpfile.release());
+  ASSERT_FALSE(RunInjectCmd({"--output", "branch-list", "-z", "-o", tmpfile.path}));
+  std::string tmp_zstd_path = std::string(tmpfile.path) + ".zst";
+  ASSERT_TRUE(RunInjectCmd({"--output", "branch-list", "-z", "-o", tmp_zstd_path}));
+  std::string autofdo_data;
+  ASSERT_TRUE(RunInjectCmd({"-i", tmp_zstd_path.c_str(), "--output", "autofdo"}, &autofdo_data));
+  CheckMatchingExpectedData("perf_inject.data", autofdo_data);
+  unlink(tmp_zstd_path.c_str());
+}
+
+// @CddTest = 6.1/C-0-2
 TEST(cmd_inject, skip_empty_output_file) {
   TemporaryFile tmpfile;
   close(tmpfile.release());
@@ -249,15 +262,13 @@ TEST(cmd_inject, read_lbr_data) {
 
   const std::string perf_data_path = GetTestData("lbr/perf_lbr.data");
   std::string data;
-  /*
   ASSERT_TRUE(get_autofdo_data({"-i", perf_data_path}, &data));
   data.erase(std::remove(data.begin(), data.end(), '\r'), data.end());
-  */
 
   std::string expected_data;
   ASSERT_TRUE(android::base::ReadFileToString(
       GetTestData(std::string("lbr") + OS_PATH_SEPARATOR + "inject_lbr.data"), &expected_data));
-  // ASSERT_EQ(data, expected_data);
+  ASSERT_EQ(data, expected_data);
 
   // Convert perf.data to branch_list.proto format.
   // Then convert branch_list.proto format to AutoFDO text format.
