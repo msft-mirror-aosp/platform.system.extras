@@ -973,7 +973,10 @@ android::base::expected<void, std::string> ConvertETMBranchMapToInstrRanges(
 
         callback(instr_range);
 
-        if (b) {
+        // As in "Table D4-10 Meaning of Atom elements in AArch64 A64" of ARMv9 manual,
+        // for branch instructions, b == true means branch taken. But for other instructions
+        // (like ISB), CPU continus to execute following instructions.
+        if (branch_taken) {
           instr.instr_addr = instr.branch_addr;
         } else {
           instr.instr_addr += instr.instr_size;
