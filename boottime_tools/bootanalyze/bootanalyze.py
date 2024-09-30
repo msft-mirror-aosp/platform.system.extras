@@ -40,6 +40,7 @@ KERNEL_TIME_KEY = "kernel"
 BOOT_ANIM_END_TIME_KEY = "BootAnimEnd"
 KERNEL_BOOT_COMPLETE = "BootComplete_kernel"
 LOGCAT_BOOT_COMPLETE = "BootComplete"
+ANDROID_INIT_SECOND_STAGE = "android_init_2st_stage"
 CARWATCHDOG_BOOT_COMPLETE = "CarWatchdogBootupProfilingComplete"
 LAUNCHER_START = "LauncherStart"
 CARWATCHDOG_DUMP_COMMAND = "adb shell dumpsys android.automotive.watchdog.ICarWatchdog/default"
@@ -389,16 +390,27 @@ def iterate(args, search_events_pattern, timings_pattern, shutdown_events_patter
     diffs.append((logcat_event_time[KERNEL_TIME_KEY], logcat_event_time[KERNEL_TIME_KEY]))
 
   if logcat_event_time.get(BOOT_ANIM_END_TIME_KEY) and dmesg_event_time.get(BOOT_ANIM_END_TIME_KEY):
-      diffs.append((logcat_event_time[BOOT_ANIM_END_TIME_KEY],\
+    diffs.append((logcat_event_time[BOOT_ANIM_END_TIME_KEY],\
                     logcat_event_time[BOOT_ANIM_END_TIME_KEY] -\
                       dmesg_event_time[BOOT_ANIM_END_TIME_KEY]))
-  if not dmesg_event_time.get(KERNEL_BOOT_COMPLETE):
-      print("BootAnimEnd time or BootComplete-kernel not captured in both log" +\
-        ", cannot get time diff")
-      print("dmesg {} logcat {}".format(dmesg_event_time, logcat_event_time))
-      return None, None, None, None, None, None
-  diffs.append((logcat_event_time[LOGCAT_BOOT_COMPLETE],\
-                logcat_event_time[LOGCAT_BOOT_COMPLETE] - dmesg_event_time[KERNEL_BOOT_COMPLETE]))
+  if logcat_event_time.get(LOGCAT_BOOT_COMPLETE) and dmesg_event_time.get(KERNEL_BOOT_COMPLETE):
+    diffs.append((
+        logcat_event_time[LOGCAT_BOOT_COMPLETE],
+        logcat_event_time[LOGCAT_BOOT_COMPLETE] - dmesg_event_time[KERNEL_BOOT_COMPLETE],
+    ))
+  elif logcat_event_time.get(ANDROID_INIT_SECOND_STAGE) and \
+      dmesg_event_time.get(ANDROID_INIT_SECOND_STAGE):
+    print("BootAnimEnd time or BootComplete-kernel not captured in both log" +\
+      ", use Android init 2nd stage get time diff")
+    diffs.append((
+      logcat_event_time[ANDROID_INIT_SECOND_STAGE],
+      logcat_event_time[ANDROID_INIT_SECOND_STAGE] - dmesg_event_time[ANDROID_INIT_SECOND_STAGE],
+    ))
+  else:
+    print("BootComplete and Android init 2nd stage not captured in both log" +\
+          ", cannot get time diff")
+    print('dmesg {} logcat {}'.format(dmesg_event_time, logcat_event_time))
+    return None, None, None, None, None, None
 
   for k, v in logcat_event_time.items():
     debug("event[{0}, {1}]".format(k, v))
@@ -419,10 +431,10 @@ def iterate(args, search_events_pattern, timings_pattern, shutdown_events_patter
       diff = diffs[0]
     events[k] = events[k] - diff[1]
     if events[k] < 0.0:
-        if events[k] < -0.1: # maybe previous one is better fit
-          events[k] = events[k] + diff[1] - diff_prev[1]
-        else:
-          events[k] = 0.0
+      if events[k] < -0.1: # maybe previous one is better fit
+        events[k] = events[k] + diff[1] - diff_prev[1]
+      else:
+        events[k] = 0.0
 
   data_points = collections.OrderedDict()
 
