@@ -938,7 +938,6 @@ class BranchDecoder {
 android::base::expected<void, std::string> ConvertETMBranchMapToInstrRanges(
     Dso* dso, const ETMBranchMap& branch_map, const ETMDecoder::InstrRangeCallbackFn& callback) {
   ETMInstrRange instr_range;
-  instr_range.dso = dso;
 
   BranchDecoder decoder;
   if (auto result = decoder.Init(dso); !result.ok()) {
