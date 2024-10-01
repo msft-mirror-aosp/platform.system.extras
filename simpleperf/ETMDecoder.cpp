@@ -976,7 +976,9 @@ android::base::expected<void, std::string> ConvertETMBranchMapToInstrRanges(
         // for branch instructions, b == true means branch taken. But for other instructions
         // (like ISB), CPU continus to execute following instructions.
         if (branch_taken) {
-          instr.instr_addr = instr.branch_addr;
+          // For OCSD_INSTR_BR_INDIRECT, instr.branch_addr points to old branch addresses. So don't
+          // use it.
+          instr.instr_addr = instr_range.branch_to_addr;
         } else {
           instr.instr_addr += instr.instr_size;
         }
