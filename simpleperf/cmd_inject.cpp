@@ -891,6 +891,47 @@ struct BranchListMerger {
   std::unordered_map<BinaryKey, uint32_t, BinaryKeyHash> lbr_binary_id_map_;
 };
 
+// Read multiple branch list files and merge them using BranchListMerger.
+class BranchListMergedReader {
+ public:
+  BranchListMergedReader(bool allow_mismatched_build_id, const RegEx* binary_name_regex)
+      : allow_mismatched_build_id_(allow_mismatched_build_id),
+        binary_name_regex_(binary_name_regex) {}
+
+  std::unique_ptr<BranchListMerger> Read(const std::vector<std::string>& input_filenames) {
+    auto merger = std::make_unique<BranchListMerger>();
+    auto etm_callback = [&](const BinaryKey& key, ETMBinary& binary) {
+      BinaryKey new_key = key;
+      if (allow_mismatched_build_id_) {
+        new_key.build_id = BuildId();
+      }
+      merger->AddETMBinary(new_key, binary);
+    };
+    auto lbr_callback = [&](LBRData& lbr_data) {
+      if (allow_mismatched_build_id_) {
+        for (BinaryKey& key : lbr_data.binaries) {
+          key.build_id = BuildId();
+        }
+      }
+      merger->AddLBRData(lbr_data);
+    };
+    for (const auto& input_filename : input_filenames) {
+      BranchListReader reader(input_filename, binary_name_regex_);
+      reader.AddCallback(etm_callback);
+      reader.AddCallback(lbr_callback);
+      if (!reader.Read()) {
+        return nullptr;
+      }
+    }
+    return merger;
+  }
+
+ private:
+  const bool allow_mismatched_build_id_;
+  const RegEx* binary_name_regex_;
+  std::unique_ptr<Dso> kernel_dso_;
+};
+
 // Write branch lists to a protobuf file specified by branch_list.proto.
 static bool WriteBranchListFile(const std::string& output_filename, const ETMBinaryMap& etm_data,
                                 const LBRData& lbr_data, bool compress) {
@@ -1151,35 +1192,16 @@ class InjectCommand : public Command {
 
   bool ConvertBranchListToAutoFDO() {
     // Step1 : Merge branch lists from all input files.
-    BranchListMerger merger;
-    auto etm_callback = [&](const BinaryKey& key, ETMBinary& binary) {
-      BinaryKey new_key = key;
-      if (allow_mismatched_build_id_) {
-        new_key.build_id = BuildId();
-      }
-      merger.AddETMBinary(new_key, binary);
-    };
-    auto lbr_callback = [&](LBRData& lbr_data) {
-      if (allow_mismatched_build_id_) {
-        for (BinaryKey& key : lbr_data.binaries) {
-          key.build_id = BuildId();
-        }
-      }
-      merger.AddLBRData(lbr_data);
-    };
-    for (const auto& input_filename : input_filenames_) {
-      BranchListReader reader(input_filename, binary_name_regex_.get());
-      reader.AddCallback(etm_callback);
-      reader.AddCallback(lbr_callback);
-      if (!reader.Read()) {
-        return false;
-      }
+    BranchListMergedReader reader(allow_mismatched_build_id_, binary_name_regex_.get());
+    std::unique_ptr<BranchListMerger> merger = reader.Read(input_filenames_);
+    if (!merger) {
+      return false;
     }
 
     // Step2: Convert ETMBinary and LBRData to AutoFDOBinaryInfo.
     AutoFDOWriter autofdo_writer;
     ETMBranchListToAutoFDOConverter converter;
-    for (auto& p : merger.GetETMData()) {
+    for (auto& p : merger->GetETMData()) {
       const BinaryKey& key = p.first;
       ETMBinary& binary = p.second;
       std::unique_ptr<AutoFDOBinaryInfo> autofdo_binary = converter.Convert(key, binary);
@@ -1189,8 +1211,8 @@ class InjectCommand : public Command {
         autofdo_writer.AddAutoFDOBinary(BinaryKey(key.path, key.build_id), *autofdo_binary);
       }
     }
-    if (!merger.GetLBRData().samples.empty()) {
-      LBRData& lbr_data = merger.GetLBRData();
+    if (!merger->GetLBRData().samples.empty()) {
+      LBRData& lbr_data = merger->GetLBRData();
       std::optional<std::vector<AutoFDOBinaryInfo>> binaries = ConvertLBRDataToAutoFDO(lbr_data);
       if (!binaries) {
         return false;
@@ -1217,32 +1239,13 @@ class InjectCommand : public Command {
 
   bool ConvertBranchListToBranchList() {
     // Step1 : Merge branch lists from all input files.
-    BranchListMerger merger;
-    auto etm_callback = [&](const BinaryKey& key, ETMBinary& binary) {
-      BinaryKey new_key = key;
-      if (allow_mismatched_build_id_) {
-        new_key.build_id = BuildId();
-      }
-      merger.AddETMBinary(new_key, binary);
-    };
-    auto lbr_callback = [&](LBRData& lbr_data) {
-      if (allow_mismatched_build_id_) {
-        for (BinaryKey& key : lbr_data.binaries) {
-          key.build_id = BuildId();
-        }
-      }
-      merger.AddLBRData(lbr_data);
-    };
-    for (const auto& input_filename : input_filenames_) {
-      BranchListReader reader(input_filename, binary_name_regex_.get());
-      reader.AddCallback(etm_callback);
-      reader.AddCallback(lbr_callback);
-      if (!reader.Read()) {
-        return false;
-      }
+    BranchListMergedReader reader(allow_mismatched_build_id_, binary_name_regex_.get());
+    std::unique_ptr<BranchListMerger> merger = reader.Read(input_filenames_);
+    if (!merger) {
+      return false;
     }
     // Step2: Write ETMBinary.
-    return WriteBranchListFile(output_filename_, merger.GetETMData(), merger.GetLBRData(),
+    return WriteBranchListFile(output_filename_, merger->GetETMData(), merger->GetLBRData(),
                                compress_);
   }
 
