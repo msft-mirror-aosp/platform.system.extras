@@ -915,13 +915,18 @@ class BranchListMergedReader {
       }
       merger->AddLBRData(lbr_data);
     };
+    size_t failed_to_read_count = 0;
     for (const auto& input_filename : input_filenames) {
       BranchListReader reader(input_filename, binary_name_regex_);
       reader.AddCallback(etm_callback);
       reader.AddCallback(lbr_callback);
       if (!reader.Read()) {
-        return nullptr;
+        failed_to_read_count++;
       }
+    }
+    if (failed_to_read_count == input_filenames.size()) {
+      LOG(ERROR) << "No valid input file";
+      return nullptr;
     }
     return merger;
   }
