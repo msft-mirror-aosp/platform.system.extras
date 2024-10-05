@@ -624,11 +624,10 @@ class ETMBranchListToAutoFDOConverter {
     autofdo_binary->executable_segments = GetExecutableSegments(dso.get());
 
     if (dso->type() == DSO_KERNEL) {
-      ModifyBranchMapForKernel(dso.get(), key.kernel_start_addr, binary);
+      CHECK_EQ(key.kernel_start_addr, 0);
     }
 
     auto process_instr_range = [&](const ETMInstrRange& range) {
-      CHECK_EQ(range.dso, dso.get());
       autofdo_binary->AddInstrRange(range);
     };
 
@@ -650,21 +649,6 @@ class ETMBranchListToAutoFDOConverter {
     BuildId build_id;
     return GetBuildIdFromDsoPath(dso->GetDebugFilePath(), &build_id) &&
            build_id == expected_build_id;
-  }
-
-  void ModifyBranchMapForKernel(Dso* dso, uint64_t kernel_start_addr, ETMBinary& binary) {
-    if (kernel_start_addr == 0) {
-      // vmlinux has been provided when generating branch lists. Addresses in branch lists are
-      // already vaddrs in vmlinux.
-      return;
-    }
-    // Addresses are still kernel ip addrs in memory. Need to convert them to vaddrs in vmlinux.
-    UnorderedETMBranchMap new_branch_map;
-    for (auto& p : binary.branch_map) {
-      uint64_t vaddr_in_file = dso->IpToVaddrInFile(p.first, kernel_start_addr, 0);
-      new_branch_map[vaddr_in_file] = std::move(p.second);
-    }
-    binary.branch_map = std::move(new_branch_map);
   }
 };
 
@@ -824,11 +808,21 @@ class AutoFDOWriter {
 // Merge branch list data.
 struct BranchListMerger {
   void AddETMBinary(const BinaryKey& key, ETMBinary& binary) {
-    if (auto it = etm_data_.find(key); it != etm_data_.end()) {
-      it->second.Merge(binary);
-    } else {
-      etm_data_[key] = std::move(binary);
+    if (binary.dso_type != DsoType::DSO_KERNEL || key.kernel_start_addr == 0) {
+      MergeETMBinary(key, binary);
+      return;
     }
+    if (!kernel_dso_) {
+      BuildId build_id = key.build_id;
+      kernel_dso_ = Dso::CreateDsoWithBuildId(binary.dso_type, key.path, build_id);
+      if (!kernel_dso_) {
+        return;
+      }
+    }
+    ModifyBranchMapForKernel(key.kernel_start_addr, binary);
+    BinaryKey new_key = key;
+    new_key.kernel_start_addr = 0;
+    MergeETMBinary(new_key, binary);
   }
 
   void AddLBRData(LBRData& lbr_data) {
@@ -868,6 +862,30 @@ struct BranchListMerger {
   LBRData& GetLBRData() { return lbr_data_; }
 
  private:
+  void MergeETMBinary(const BinaryKey& key, ETMBinary& binary) {
+    if (auto it = etm_data_.find(key); it != etm_data_.end()) {
+      it->second.Merge(binary);
+    } else {
+      etm_data_[key] = std::move(binary);
+    }
+  }
+
+  void ModifyBranchMapForKernel(uint64_t kernel_start_addr, ETMBinary& binary) {
+    if (kernel_start_addr == 0) {
+      // vmlinux has been provided when generating branch lists. Addresses in branch lists are
+      // already vaddrs in vmlinux.
+      return;
+    }
+    // Addresses are still kernel ip addrs in memory. Need to convert them to vaddrs in vmlinux.
+    UnorderedETMBranchMap new_branch_map;
+    for (auto& p : binary.branch_map) {
+      uint64_t vaddr_in_file = kernel_dso_->IpToVaddrInFile(p.first, kernel_start_addr, 0);
+      new_branch_map[vaddr_in_file] = std::move(p.second);
+    }
+    binary.branch_map = std::move(new_branch_map);
+  }
+
+  std::unique_ptr<Dso> kernel_dso_;
   ETMBinaryMap etm_data_;
   LBRData lbr_data_;
   std::unordered_map<BinaryKey, uint32_t, BinaryKeyHash> lbr_binary_id_map_;
@@ -983,6 +1001,7 @@ class InjectCommand : public Command {
     }
 
     if (options.PullBoolValue("--allow-mismatched-build-id")) {
+      allow_mismatched_build_id_ = true;
       Dso::AllowMismatchedBuildId();
     }
     if (auto value = options.PullValue("--binary"); value) {
@@ -1134,9 +1153,20 @@ class InjectCommand : public Command {
     // Step1 : Merge branch lists from all input files.
     BranchListMerger merger;
     auto etm_callback = [&](const BinaryKey& key, ETMBinary& binary) {
-      merger.AddETMBinary(key, binary);
+      BinaryKey new_key = key;
+      if (allow_mismatched_build_id_) {
+        new_key.build_id = BuildId();
+      }
+      merger.AddETMBinary(new_key, binary);
     };
-    auto lbr_callback = [&](LBRData& lbr_data) { merger.AddLBRData(lbr_data); };
+    auto lbr_callback = [&](LBRData& lbr_data) {
+      if (allow_mismatched_build_id_) {
+        for (BinaryKey& key : lbr_data.binaries) {
+          key.build_id = BuildId();
+        }
+      }
+      merger.AddLBRData(lbr_data);
+    };
     for (const auto& input_filename : input_filenames_) {
       BranchListReader reader(input_filename, binary_name_regex_.get());
       reader.AddCallback(etm_callback);
@@ -1189,9 +1219,20 @@ class InjectCommand : public Command {
     // Step1 : Merge branch lists from all input files.
     BranchListMerger merger;
     auto etm_callback = [&](const BinaryKey& key, ETMBinary& binary) {
-      merger.AddETMBinary(key, binary);
+      BinaryKey new_key = key;
+      if (allow_mismatched_build_id_) {
+        new_key.build_id = BuildId();
+      }
+      merger.AddETMBinary(new_key, binary);
     };
-    auto lbr_callback = [&](LBRData& lbr_data) { merger.AddLBRData(lbr_data); };
+    auto lbr_callback = [&](LBRData& lbr_data) {
+      if (allow_mismatched_build_id_) {
+        for (BinaryKey& key : lbr_data.binaries) {
+          key.build_id = BuildId();
+        }
+      }
+      merger.AddLBRData(lbr_data);
+    };
     for (const auto& input_filename : input_filenames_) {
       BranchListReader reader(input_filename, binary_name_regex_.get());
       reader.AddCallback(etm_callback);
@@ -1212,6 +1253,7 @@ class InjectCommand : public Command {
   OutputFormat output_format_ = OutputFormat::AutoFDO;
   ETMDumpOption etm_dump_option_;
   bool compress_ = false;
+  bool allow_mismatched_build_id_ = false;
 
   std::unique_ptr<Dso> placeholder_dso_;
 };
