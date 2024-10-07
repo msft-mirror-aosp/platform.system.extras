@@ -838,7 +838,7 @@ def do_reboot(serial, use_adb_reboot):
   while retry < 20:
     current_devices = subprocess.check_output("adb devices", shell=True).decode('utf-8', 'ignore')
     if original_devices != current_devices:
-      if not serial or (serial and current_devices.find(serial) < 0):
+      if not serial or (serial and re.findall(serial + ".*offline", current_devices, re.MULTILINE)):
         return True
     time.sleep(1)
     retry += 1
