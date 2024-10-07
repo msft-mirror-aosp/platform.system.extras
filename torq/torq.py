@@ -167,6 +167,26 @@ def verify_args(args):
         ("Set --dur-ms %d to capture a trace for %d seconds."
          % (MIN_DURATION_MS, (MIN_DURATION_MS / 1000))))
 
+  if args.from_user is not None and args.event != "user-switch":
+    return None, ValidationError(
+        ("Command is invalid because --from-user is passed, but --event is not"
+         " set to user-switch."),
+        ("Set --event user-switch --from-user %s to perform a user-switch from"
+         " user %s." % (args.from_user, args.from_user)))
+
+  if args.to_user is not None and args.event != "user-switch":
+    return None, ValidationError((
+        "Command is invalid because --to-user is passed, but --event is not set"
+        " to user-switch."),
+        ("Set --event user-switch --to-user %s to perform a user-switch to user"
+         " %s." % (args.to_user, args.to_user)))
+
+  if args.event == "user-switch" and args.to_user is None:
+    return None, ValidationError(
+        "Command is invalid because --to-user is not passed.",
+        ("Set --event %s --to-user <user-id> to perform a %s."
+         % (args.event, args.event)))
+
   if args.app is not None and args.event != "app-startup":
     return None, ValidationError(
         ("Command is invalid because --app is passed and --event is not set"
@@ -174,10 +194,23 @@ def verify_args(args):
         ("To profile an app startup run:"
          " torq --event app-startup --app <package-name>"))
 
+  if args.event == "app-startup" and args.app is None:
+    return None, ValidationError(
+        "Command is invalid because --app is not passed.",
+        ("Set --event %s --app <package> to perform an %s."
+         % (args.event, args.event)))
+
   if args.runs < 1:
     return None, ValidationError(
         ("Command is invalid because --runs cannot be set to a value smaller"
          " than 1."), None)
+
+  if args.runs > 1 and args.ui:
+    return None, ValidationError(("Command is invalid because --ui cannot be"
+                                  " passed if --runs is set to a value greater"
+                                  " than 1."),
+                                 ("Set torq -r %d --no-ui to perform %d runs."
+                                  % (args.runs, args.runs)))
 
   if args.simpleperf_event is not None and args.profiler != "simpleperf":
     return None, ValidationError(
@@ -390,8 +423,7 @@ def create_config_command(args):
   command = None
   type = "config " + args.config_subcommand
   if args.config_subcommand == "pull":
-    command = ConfigCommand(type, args.config_name,
-                            args.file_path)
+    command = ConfigCommand(type, args.config_name, args.file_path)
   if args.config_subcommand == "show":
     command = ConfigCommand(type, args.config_name, None)
   if args.config_subcommand == "list":

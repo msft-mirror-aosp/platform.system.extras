@@ -15,8 +15,9 @@
 #
 
 from abc import ABC, abstractmethod
-from command_executor import ProfilerCommandExecutor, HWCommandExecutor, \
-  ConfigCommandExecutor
+from command_executor import ProfilerCommandExecutor, \
+  UserSwitchCommandExecutor, BootCommandExecutor, AppStartupCommandExecutor, \
+  HWCommandExecutor, ConfigCommandExecutor
 from validation_error import ValidationError
 
 
@@ -61,19 +62,62 @@ class ProfilerCommand(Command):
     self.included_ftrace_events = included_ftrace_events
     self.from_user = from_user
     self.to_user = to_user
-    self.command_executor = ProfilerCommandExecutor()
+    match event:
+      case "custom":
+        self.command_executor = ProfilerCommandExecutor()
+      case "user-switch":
+        self.original_user = None
+        self.command_executor = UserSwitchCommandExecutor()
+      case "boot":
+        self.command_executor = BootCommandExecutor()
+      case "app-startup":
+        self.command_executor = AppStartupCommandExecutor()
+      case _:
+        raise ValueError("Invalid event name was used.")
 
   def validate(self, device):
     print("Further validating arguments of ProfilerCommand.")
-    # TODO: call relevant Device APIs according to args
-    if self.app is not None:
-      device.app_exists(self.app)
     if self.simpleperf_event is not None:
       device.simpleperf_event_exists(self.simpleperf_event)
-    if self.from_user is not None:
-      device.user_exists(self.from_user)
-    if self.to_user is not None:
-      device.user_exists(self.to_user)
+    match self.event:
+      case "user-switch":
+        return self.validate_user_switch(device)
+      case "app-startup":
+        return self.validate_app_startup(device)
+
+  def validate_user_switch(self, device):
+    error = device.user_exists(self.to_user)
+    if error is not None:
+      return error
+    self.original_user = device.get_current_user()
+    if self.from_user is None:
+      self.from_user = self.original_user
+    else:
+      error = device.user_exists(self.from_user)
+      if error is not None:
+        return error
+    if self.from_user == self.to_user:
+      return ValidationError("Cannot perform user-switch to user %s because"
+                             " the current user on device %s is already %s."
+                             % (self.to_user, device.serial, self.from_user),
+                             "Choose a --to-user ID that is different than"
+                             " the --from-user ID.")
+    return None
+
+  def validate_app_startup(self, device):
+    packages = device.get_packages()
+    if self.app not in packages:
+      return ValidationError(("Package %s does not exist on device with serial"
+                              " %s." % (self.app, device.serial)),
+                             ("Select from one of the following packages on"
+                              " device with serial %s: \n\t %s"
+                              % (device.serial, (",\n\t ".join(packages)))))
+    if device.is_package_running(self.app):
+      return ValidationError(("Package %s is already running on device with"
+                              " serial %s." % (self.app, device.serial)),
+                             ("Run 'adb -s %s shell am force-stop %s' to close"
+                              " the package %s before trying to start it."
+                              % (device.serial, self.app, self.app)))
     return None
 
 
