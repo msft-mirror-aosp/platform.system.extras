@@ -213,6 +213,28 @@ The binaries should have an unstripped symbol table, and linked with relocations
 Android also has a daemon collecting ETM data periodically. It only runs on userdebug and eng
 devices. The source code is in https://android.googlesource.com/platform/system/extras/+/main/profcollectd/.
 
+## Options for collecting ETM data
+
+Simpleperf provides several options for ETM data collection, which are listed in the
+"ETM recording options" section of the `simpleperf record -h` output. Here's an introduction to some
+of them:
+
+ETM traces the instruction stream and can generate a large amount of data in a short time. The
+kernel uses a buffer to store this data.  The default buffer size is 4MB, which can be controlled
+with the `--aux-buffer-size` option. Simpleperf periodically reads data from this buffer, by default
+every 100ms. This interval can be adjusted using the `--etm-flush-interval` option. If the buffer
+overflows, excess ETM data is lost. The default data generation rate is 40MB/s. This is true when
+using ETR, TRBE might copy data more frequently.
+
+To reduce storage size, ETM data can be compressed before being written to disk using the `-z`
+option. In practice, this reduces storage size by 75%.
+
+Another way to reduce storage size is to decode ETM data before storing it, using the `--decode-etm`
+option. This can achieve around a 98% reduction in storage size. However, it doubles CPU cycles and
+and power for recording, and can lead to data loss if processing doesn't keep up with the data
+generation rate. For this reason, profcollectd currently uses `-z` for compression instead of
+`--decode-etm`.
+
 ## Support ETM in the kernel
 
 To let simpleperf use ETM function, we need to enable Coresight driver in the kernel, which lives in
