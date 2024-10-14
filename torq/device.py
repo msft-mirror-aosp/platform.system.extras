@@ -198,7 +198,7 @@ class AdbDevice:
         capture_output=True).stdout.decode("utf-8").split("\n")[0]
 
   def get_android_sdk_version(self):
-    return int(get_prop("ro.build.version.sdk"))
+    return int(self.get_prop("ro.build.version.sdk"))
 
   def get_num_cpus(self):
     raise NotImplementedError
