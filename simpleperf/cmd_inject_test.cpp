@@ -201,6 +201,13 @@ TEST(cmd_inject, merge_branch_list_files) {
   std::string autofdo_data;
   ASSERT_TRUE(RunInjectCmd({"-i", tmpfile2.path, "--output", "autofdo"}, &autofdo_data));
   ASSERT_NE(autofdo_data.find("106c->1074:200"), std::string::npos);
+
+  // Accept invalid branch list files.
+  TemporaryFile tmpfile3;
+  close(tmpfile3.release());
+  ASSERT_TRUE(android::base::WriteStringToFile("bad content", tmpfile3.path));
+  ASSERT_TRUE(RunInjectCmd({"-i", std::string(tmpfile.path) + "," + tmpfile3.path, "--output",
+                            "branch-list", "-o", tmpfile2.path}));
 }
 
 // @CddTest = 6.1/C-0-2
@@ -310,4 +317,26 @@ TEST(cmd_inject, inject_small_binary) {
 
   ASSERT_TRUE(RunInjectCmd({"-i", perf_data, "--output", "bolt"}, &data));
   CheckMatchingExpectedData("perf_inject_small_bolt.data", data);
+}
+
+// @CddTest = 6.1/C-0-2
+TEST(cmd_inject, j_option) {
+  TemporaryFile tmpfile;
+  close(tmpfile.release());
+  ASSERT_TRUE(RunInjectCmd({"--output", "branch-list", "-o", tmpfile.path}));
+  std::string autofdo_data;
+  ASSERT_TRUE(RunInjectCmd(
+      {"-i", std::string(tmpfile.path) + "," + tmpfile.path, "--output", "autofdo", "-j", "1"},
+      &autofdo_data));
+  ASSERT_NE(autofdo_data.find("106c->1074:200"), std::string::npos);
+
+  ASSERT_TRUE(RunInjectCmd(
+      {"-i", std::string(tmpfile.path) + "," + tmpfile.path, "--output", "autofdo", "-j", "2"},
+      &autofdo_data));
+  ASSERT_NE(autofdo_data.find("106c->1074:200"), std::string::npos);
+
+  // Invalid job count.
+  ASSERT_FALSE(RunInjectCmd(
+      {"-i", std::string(tmpfile.path) + "," + tmpfile.path, "--output", "autofdo", "-j", "0"},
+      &autofdo_data));
 }
