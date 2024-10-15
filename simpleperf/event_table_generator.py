@@ -122,6 +122,9 @@ class CpuModel:
     name: str
     implementer: int
     partnum: int
+    mvendorid: int
+    marchid: str
+    mimpid: str
     supported_raw_events: list[int] = dataclasses.field(default_factory=list)
 
 
@@ -140,9 +143,17 @@ class ArchData:
             self.events.append(RawEvent(number, name, desc, self.arch))
         for cpu in data['cpus']:
             cpu_name = cpu['name'].lower().replace('_', '-')
-            cpu_model = CpuModel(cpu['name'], int(cpu['implementer'], 16),
-                                 int(cpu['partnum'], 16), [])
+            cpu_model = CpuModel(
+                cpu['name'],
+                int(cpu.get('implementer', '0'), 16),
+                int(cpu.get('partnum', '0'), 16),
+                int(cpu.get('mvendorid', '0'), 16),
+                cpu.get('marchid', '0'),
+                cpu.get('mimpid', '0'),
+                []
+            )
             cpu_index = len(self.cpus)
+
             self.cpus.append(cpu_model)
             # Load common events supported in this cpu model.
             for number in cpu['common_events']:
@@ -173,48 +184,77 @@ class RawEventGenerator:
             event_table = json.load(fh)
             self.arm64_data = ArchData('arm64')
             self.arm64_data.load_from_json_data(event_table['arm64'])
+            self.riscv64_data = ArchData('riscv64')
+            self.riscv64_data.load_from_json_data(event_table['riscv64'])
 
     def generate_raw_events(self) -> str:
-        lines = []
-        for event in self.arm64_data.events:
-            lines.append(gen_event_type_entry_str(event.name, 'PERF_TYPE_RAW', '0x%x' %
+        def generate_event_entries(events, guard) -> list:
+            lines = []
+            for event in events:
+                lines.append(gen_event_type_entry_str(event.name, 'PERF_TYPE_RAW', '0x%x' %
                          event.number, event.desc, event.limited_arch))
-        return self.add_arm_guard(''.join(lines))
+            return guard(''.join(lines))
+
+        lines_arm64 = generate_event_entries(self.arm64_data.events, self.add_arm_guard)
+        lines_riscv64 = generate_event_entries(self.riscv64_data.events, self.add_riscv_guard)
+
+        return lines_arm64 + lines_riscv64
 
     def generate_cpu_support_events(self) -> str:
-        text = """
-        // Map from cpu model to raw events supported on that cpu.',
-        std::unordered_map<std::string, std::unordered_set<int>> cpu_supported_raw_events = {
+        def generate_cpu_events(data, guard) -> str:
+            lines = []
+            for cpu in data:
+                event_list = ', '.join('0x%x' % number for number in cpu.supported_raw_events)
+                lines.append('{"%s", {%s}},' % (cpu.name, event_list))
+            return guard('\n'.join(lines))
+
+        text = f"""
+        // Map from cpu model to raw events supported on that cpu.
+        std::unordered_map<std::string, std::unordered_set<int>> cpu_supported_raw_events = {{
+        {generate_cpu_events(self.arm64_data.cpus, self.add_arm_guard)}
+        {generate_cpu_events(self.riscv64_data.cpus, self.add_riscv_guard)}
+        }};\n
         """
 
-        lines = []
-        for cpu in self.arm64_data.cpus:
-            event_list = ', '.join('0x%x' % number for number in cpu.supported_raw_events)
-            lines.append('{"%s", {%s}},' % (cpu.name, event_list))
-        text += self.add_arm_guard('\n'.join(lines))
-        text += '};\n'
         return text
 
     def generate_cpu_models(self) -> str:
-        text = """
-        std::unordered_map<uint64_t, std::string> arm64_cpuid_to_name = {
-        """
-        lines = []
-        for cpu in self.arm64_data.cpus:
-            cpu_id = (cpu.implementer << 32) | cpu.partnum
-            lines.append('{0x%xull, "%s"},' % (cpu_id, cpu.name))
-        text += '\n'.join(lines)
-        text += '};\n'
-        return self.add_arm_guard(text)
+        def generate_model(data, map_type, map_key_type, id_func) -> str:
+            lines = [f'std::{map_type}<{map_key_type}, std::string> cpuid_to_name = {{']
+            for cpu in data:
+                cpu_id = id_func(cpu)
+                lines.append(f'{{{cpu_id}, "{cpu.name}"}},')
+            lines.append('};')
+            return '\n'.join(lines)
+
+        arm64_model = generate_model(
+            self.arm64_data.cpus,
+            "unordered_map",
+            "uint64_t",
+            lambda cpu: f"0x{((cpu.implementer << 32) | cpu.partnum):x}ull"
+        )
+
+        riscv64_model = generate_model(
+            self.riscv64_data.cpus,
+            "map",
+            "std::tuple<uint64_t, std::string, std::string>",
+            lambda cpu: f'{{0x{cpu.mvendorid:x}ull, "{cpu.marchid}", "{cpu.mimpid}"}}'
+        )
+
+        return self.add_arm_guard(arm64_model) + "\n" + self.add_riscv_guard(riscv64_model)
 
     def add_arm_guard(self, data: str) -> str:
         return f'#if defined(__aarch64__) || defined(__arm__)\n{data}\n#endif\n'
+
+    def add_riscv_guard(self, data: str) -> str:
+        return f'#if defined(__riscv)\n{data}\n#endif\n'
 
 
 def gen_events(event_table_file: str):
     generated_str = """
         #include <unordered_map>
         #include <unordered_set>
+        #include <map>
 
         #include "event_type.h"
 
