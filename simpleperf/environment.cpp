@@ -1033,12 +1033,14 @@ std::optional<uid_t> GetProcessUid(pid_t pid) {
   return std::nullopt;
 }
 
-std::vector<ARMCpuModel> GetARMCpuModels() {
-  std::vector<ARMCpuModel> cpu_models;
+std::vector<CpuModel> GetCpuModels() {
+  std::vector<CpuModel> cpu_models;
   LineReader reader("/proc/cpuinfo");
   if (!reader.Ok()) {
     return cpu_models;
   }
+
+#if defined(__aarch64__) || defined(__arm__)
   auto add_cpu = [&](uint32_t processor, uint32_t implementer, uint32_t partnum) {
     for (auto& model : cpu_models) {
       if (model.implementer == implementer && model.partnum == partnum) {
@@ -1047,15 +1049,41 @@ std::vector<ARMCpuModel> GetARMCpuModels() {
       }
     }
     cpu_models.resize(cpu_models.size() + 1);
-    ARMCpuModel& model = cpu_models.back();
+    CpuModel& model = cpu_models.back();
     model.implementer = implementer;
     model.partnum = partnum;
     model.cpus.push_back(processor);
   };
+#endif // defined(__aarch64__) || defined(__arm__)
+
+#if defined(__riscv)
+  auto add_cpu = [&](uint32_t processor, uint64_t mvendorid, uint64_t marchid, uint64_t mimpid) {
+    for (auto& model : cpu_models) {
+      if (model.mvendorid == mvendorid && model.marchid == marchid && model.mimpid == mimpid) {
+        model.cpus.push_back(processor);
+        return;
+      }
+    }
+    cpu_models.resize(cpu_models.size() + 1);
+    CpuModel& model = cpu_models.back();
+    model.mvendorid = mvendorid;
+    model.marchid = marchid;
+    model.mimpid = mimpid;
+    model.cpus.push_back(processor);
+  };
+#endif // defined(__riscv)
 
   uint32_t processor = 0;
+#if defined(__aarch64__) || defined(__arm__)
   uint32_t implementer = 0;
   uint32_t partnum = 0;
+#endif // defined(__aarch64__) || defined(__arm__)
+#if defined(__riscv)
+  uint64_t mvendorid = 0;
+  uint64_t marchid = 0;
+  uint64_t mimpid = 0;
+#endif // defined(__riscv)
+
   int parsed = 0;
   std::string* line;
   while ((line = reader.ReadLine()) != nullptr) {
@@ -1069,7 +1097,10 @@ std::vector<ARMCpuModel> GetARMCpuModels() {
       if (android::base::ParseUint(value, &processor)) {
         parsed |= 1;
       }
-    } else if (name == "CPU implementer") {
+    }
+
+#if defined(__aarch64__) || defined(__arm__)
+    else if (name == "CPU implementer") {
       if (android::base::ParseUint(value, &implementer)) {
         parsed |= 2;
       }
@@ -1079,6 +1110,25 @@ std::vector<ARMCpuModel> GetARMCpuModels() {
       }
       parsed = 0;
     }
+#endif // defined(__aarch64__) || defined(__arm__)
+
+#if defined(__riscv)
+    else if (name == "mvendorid") {
+      if (android::base::ParseUint(value, &mvendorid)) {
+        parsed |= 2;
+      }
+    } else if (name == "marchid") {
+      if (android::base::ParseUint(value, &marchid)) {
+        parsed |= 4;
+      }
+    } else if (name == "mimpid") {
+      if (android::base::ParseUint(value, &mimpid) && (parsed == 0x7)) {
+        add_cpu(processor, mvendorid, marchid, mimpid);
+      }
+      parsed = 0;
+    }
+#endif // defined(__riscv)
+
   }
   return cpu_models;
 }
