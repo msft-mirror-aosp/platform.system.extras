@@ -102,7 +102,7 @@ The source code is in [etm_test_loop.cpp](https://android.googlesource.com/platf
 The build script is in [Android.bp](https://android.googlesource.com/platform/system/extras/+/main/simpleperf/runtest/Android.bp).
 It builds an executable called `etm_test_loop`, which runs on device.
 
-Step 1: Build `etm_test_loop` binary.
+**Step 1: Build `etm_test_loop` binary**
 
 ```sh
 (host) <AOSP>$ . build/envsetup.sh
@@ -110,7 +110,7 @@ Step 1: Build `etm_test_loop` binary.
 (host) <AOSP>$ make etm_test_loop
 ```
 
-Step 2: Run `etm_test_loop` on device, and collect ETM data for its running.
+**Step 2: Run `etm_test_loop` on device, and collect ETM data for its running**
 
 ```sh
 (host) <AOSP>$ adb push out/target/product/generic_arm64/system/bin/etm_test_loop /data/local/tmp
@@ -126,7 +126,7 @@ simpleperf I cmd_record.cpp:879] Aux data traced: 1,134,720
 (host) <AOSP>$ adb pull /data/local/tmp/branch_list.data
 ```
 
-Step 3: Convert ETM data to AutoFDO data.
+**Step 3: Convert ETM data to AutoFDO profile**
 
 ```sh
 # Build simpleperf tool on host.
@@ -146,7 +146,7 @@ Step 3: Convert ETM data to AutoFDO data.
 rw-r--r-- 1 user group 241 Apr 30 09:52 etm_test_loop.afdo
 ```
 
-Step 4: Use AutoFDO data to build optimized binary.
+**Step 4: Use AutoFDO profile to build optimized binary**
 
 ```sh
 (host) <AOSP>$ cp etm_test_loop.afdo toolchain/pgo-profiles/sampling/
@@ -186,6 +186,76 @@ We can check if `etm_test_loop.afdo` is used when building etm_test_loop.
 
 If comparing the disassembly of `out/target/product/generic_arm64/symbols/system/bin/etm_test_loop`
 before and after optimizing with AutoFDO data, we can see different preferences when branching.
+
+### A complete example: kernel
+
+This example demonstrates how to collect ETM data for the Android kernel on a device, convert it to
+an AutoFDO profile on the host machine, and then use that profile to build an optimized kernel.
+
+
+**Step 1 (Optional): Build a Kernel with `-fdebug-info-for-profiling`**
+
+While not strictly required, we recommend building the vmlinux file with the
+`-fdebug-info-for-profiling` compiler flag. This option adds extra debug information that helps map
+instructions accurately to source code, improving profile quality. For more details, see
+[this LLVM review](https://reviews.llvm.org/D25435).
+
+An example of how to add this flag to a kernel build can be found in
+[this Android kernel commit](https://android-review.googlesource.com/c/kernel/common/+/3101987).
+
+
+**Step 2: Collect ETM data for the kernel on device**
+
+```sh
+(host) $ adb root && adb shell
+(device) / $ cd /data/local/tmp
+# Record ETM data while running a representative workload (e.g., launching applications or
+# running benchmarks):
+(device) / $ simpleperf record -e cs-etm:k -a --duration 60 -z -o perf.data
+simpleperf I cmd_record.cpp:826] Recorded for 60.0796 seconds. Start post processing.
+simpleperf I cmd_record.cpp:902] Aux data traced: 91,780,432
+simpleperf I cmd_record.cpp:894] Record compressed: 27.76 MB (original 110.13 MB, ratio 4)
+# Convert the raw ETM data to a branch list to reduce file size:
+(device) / $ mkdir branch_data
+(device) / $ simpleperf inject -i perf.data -o branch_data/branch01.data --output branch-list \
+             --binary kernel.kallsyms
+(device) / $ ls branch01.data
+-rw-rw-rw- 1 root  root  437K 2024-10-17 23:03 branch01.data
+# Run the record command and the inject command multiple times to capture a wider range of kernel
+# code execution. ETM data traces the instruction stream, and under heavy load, much of this data
+# can be lost due to overflow and rate limiting within simpleperf. Recording multiple profiles and
+# merging them improves coverage.
+```
+
+Alternative: Instead of manual recording, you can use `profcollectd` to continuously collect ETM
+data in the background. See the [Collect ETM Data with a Daemon](#collect-etm-data-with-a-daemon)
+section for more information.
+
+
+**Step 3: Convert ETM data to AutoFDO Profile on Host**
+
+```sh
+(host) $ adb pull /data/local/tmp/branch_data
+(host) $ cd branch_data
+# Download the corresponding vmlinux file and place it in the current directory.
+# Merge the branch data files and generate an AutoFDO profile:
+(host) $ simpleperf inject -i branch01.data,branch02.data,... --binary kernel.kallsyms --symdir . \
+         --allow-mismatched-build-id -o kernel.autofdo -j 20
+(host) $ ls -lh kernel.autofdo
+-rw-r--r-- 1 yabinc primarygroup 1.3M Oct 17 16:39 kernel.autofdo
+# Convert the AutoFDO profile to the LLVM profile format:
+(host) $ create_llvm_prof --profiler text --binary=vmlinux --profile=kernel.autofdo \
+				--out=kernel.llvm_profdata --format binary
+(host) $ ls -lh kernel.llvm_profdata
+-rw-r--r-- 1 yabinc primarygroup 1.4M Oct 17 19:00 kernel.llvm_profdata
+```
+
+**Step 4: Use the AutoFDO Profile when Building a New Kernel**
+
+Integrate the generated kernel.llvm_profdata file into your kernel build process. An example of
+how to use this profile data with vmlinux can be found in
+[this Android kernel commit](https://android-review.googlesource.com/c/kernel/common/+/3293642).
+
 
 ## Convert ETM data for llvm-bolt (experiment)
 
