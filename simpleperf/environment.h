@@ -152,13 +152,24 @@ static inline int gettid() {
 }
 #endif
 
-struct ARMCpuModel {
-  uint32_t implementer = 0;
-  uint32_t partnum = 0;
+struct CpuModel {
+  std::string arch;  // "arm", "riscv" or "x86"
+  struct {
+    uint32_t implementer = 0;
+    uint32_t partnum = 0;
+  } arm_data;
+  struct {
+    uint64_t mvendorid = 0;
+    uint64_t marchid = 0;
+    uint64_t mimpid = 0;
+  } riscv_data;
+  struct {
+    std::string vendor_id;
+  } x86_data;
   std::vector<int> cpus;
 };
 
-std::vector<ARMCpuModel> GetARMCpuModels();
+std::vector<CpuModel> GetCpuModels();
 
 #endif  // defined(__linux__)
 
