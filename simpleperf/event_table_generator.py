@@ -19,6 +19,7 @@ import dataclasses
 from dataclasses import dataclass
 import json
 import sys
+from typing import List
 
 
 def gen_event_type_entry_str(event_type_name, event_type, event_config, description='',
@@ -178,6 +179,19 @@ class ArchData:
         raise Exception(f'no event for event number {event_number}')
 
 
+class X86ArchData:
+    def __init__(self, arch: str):
+        self.arch = arch
+        self.events: List[RawEvent] = []
+
+    def load_from_json_data(self, data) -> None:
+        for event in data['events']:
+            number = int(event[0], 16)
+            name = event[1]
+            desc = event[2]
+            self.events.append(RawEvent(number, name, desc, self.arch))
+
+
 class RawEventGenerator:
     def __init__(self, event_table_file: str):
         with open(event_table_file, 'r') as fh:
@@ -186,6 +200,10 @@ class RawEventGenerator:
             self.arm64_data.load_from_json_data(event_table['arm64'])
             self.riscv64_data = ArchData('riscv64')
             self.riscv64_data.load_from_json_data(event_table['riscv64'])
+            self.x86_intel_data = X86ArchData('x86-intel')
+            self.x86_intel_data.load_from_json_data(event_table['x86-intel'])
+            self.x86_amd_data = X86ArchData('x86-amd')
+            self.x86_amd_data.load_from_json_data(event_table['x86-amd'])
 
     def generate_raw_events(self) -> str:
         def generate_event_entries(events, guard) -> list:
@@ -197,8 +215,10 @@ class RawEventGenerator:
 
         lines_arm64 = generate_event_entries(self.arm64_data.events, self.add_arm_guard)
         lines_riscv64 = generate_event_entries(self.riscv64_data.events, self.add_riscv_guard)
+        lines_x86_intel = generate_event_entries(self.x86_intel_data.events, self.add_x86_guard)
+        lines_x86_amd = generate_event_entries(self.x86_amd_data.events, self.add_x86_guard)
 
-        return lines_arm64 + lines_riscv64
+        return lines_arm64 + lines_riscv64 + lines_x86_intel + lines_x86_amd
 
     def generate_cpu_support_events(self) -> str:
         def generate_cpu_events(data, guard) -> str:
@@ -248,6 +268,9 @@ class RawEventGenerator:
 
     def add_riscv_guard(self, data: str) -> str:
         return f'#if defined(__riscv)\n{data}\n#endif\n'
+
+    def add_x86_guard(self, data: str) -> str:
+        return f'#if defined(__i386__) || defined(__x86_64__)\n{data}\n#endif\n'
 
 
 def gen_events(event_table_file: str):
