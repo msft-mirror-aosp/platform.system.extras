@@ -18,11 +18,13 @@ import time
 from abc import ABC, abstractmethod
 from config_builder import PREDEFINED_PERFETTO_CONFIGS, build_custom_config
 from open_ui import open_trace
+from device import SIMPLEPERF_TRACE_FILE
 
 PERFETTO_TRACE_FILE = "/data/misc/perfetto-traces/trace.perfetto-trace"
 PERFETTO_BOOT_TRACE_FILE = "/data/misc/perfetto-traces/boottrace.perfetto-trace"
-PERFETTO_WEB_UI_ADDRESS = "https://ui.perfetto.dev"
-PERFETTO_TRACE_START_DELAY_SECS = 0.5
+WEB_UI_ADDRESS = "https://ui.perfetto.dev"
+TRACE_START_DELAY_SECS = 0.5
+ANDROID_SDK_VERSION_T = 33
 
 
 class CommandExecutor(ABC):
@@ -50,7 +52,7 @@ class CommandExecutor(ABC):
 class ProfilerCommandExecutor(CommandExecutor):
 
   def execute_command(self, command, device):
-    config, error = self.create_config(command)
+    config, error = self.create_config(command, device.get_android_sdk_version())
     if error is not None:
       return error
     error = self.prepare_device(command, device, config)
@@ -58,7 +60,10 @@ class ProfilerCommandExecutor(CommandExecutor):
       return error
     host_file = None
     for run in range(1, command.runs + 1):
-      host_file = f"{command.out_dir}/trace-{run}.perfetto-trace"
+      if command.profiler == "perfetto":
+        host_file = f"{command.out_dir}/trace-{run}.perfetto-trace"
+      else:
+        host_file = f"{command.out_dir}/perf-{run}.data"
       error = self.prepare_device_for_run(command, device, run)
       if error is not None:
         return error
@@ -74,12 +79,13 @@ class ProfilerCommandExecutor(CommandExecutor):
     if error is not None:
       return error
     if command.use_ui:
-      open_trace(host_file, PERFETTO_WEB_UI_ADDRESS)
+      open_trace(host_file, WEB_UI_ADDRESS)
     return None
 
-  def create_config(self, command):
+  def create_config(self, command, android_sdk_version):
     if command.perfetto_config in PREDEFINED_PERFETTO_CONFIGS:
-      return PREDEFINED_PERFETTO_CONFIGS[command.perfetto_config](command)
+      return PREDEFINED_PERFETTO_CONFIGS[command.perfetto_config](
+          command, android_sdk_version)
     else:
       return build_custom_config(command)
 
@@ -87,15 +93,21 @@ class ProfilerCommandExecutor(CommandExecutor):
     return None
 
   def prepare_device_for_run(self, command, device, run):
-    device.remove_file(PERFETTO_TRACE_FILE)
+    if command.profiler == "perfetto":
+      device.remove_file(PERFETTO_TRACE_FILE)
+    else:
+      device.remove_file(SIMPLEPERF_TRACE_FILE)
 
   def execute_run(self, command, device, config, run):
     print("Performing run %s" % run)
-    process = device.start_perfetto_trace(config)
-    time.sleep(PERFETTO_TRACE_START_DELAY_SECS)
+    if command.profiler == "perfetto":
+      process = device.start_perfetto_trace(config)
+    else:
+      process = device.start_simpleperf_trace(command)
+    time.sleep(TRACE_START_DELAY_SECS)
     error = self.trigger_system_event(command, device)
     if error is not None:
-      device.kill_pid("perfetto")
+      device.kill_pid(command.profiler)
       return error
     process.wait()
 
@@ -103,7 +115,10 @@ class ProfilerCommandExecutor(CommandExecutor):
     return None
 
   def retrieve_perf_data(self, command, device, host_file):
-    device.pull_file(PERFETTO_TRACE_FILE, host_file)
+    if command.profiler == "perfetto":
+      device.pull_file(PERFETTO_TRACE_FILE, host_file)
+    else:
+      device.pull_file(SIMPLEPERF_TRACE_FILE, host_file)
 
   def cleanup(self, command, device):
     return None
@@ -174,21 +189,31 @@ class ConfigCommandExecutor(CommandExecutor):
   def execute(self, command, device):
     return self.execute_command(command, device)
 
-  def execute_command(self, config_command, device):
-    match config_command.get_type():
+  def execute_command(self, command, device):
+    match command.get_type():
       case "config list":
         print("\n".join(list(PREDEFINED_PERFETTO_CONFIGS.keys())))
         return None
       case "config show":
-        return self.execute_config_show_command(config_command.config_name)
+        return self.execute_config_show_command(command, device)
       case "config pull":
-        return self.execute_config_pull_command(config_command.config_name,
-                                                config_command.file_path)
+        return self.execute_config_pull_command(command)
       case _:
         raise ValueError("Invalid config subcommand was used.")
 
-  def execute_config_show_command(self, config_name):
+  def execute_config_pull_command(self, command):
     return None
 
-  def execute_config_pull_command(self, config_name, file_path):
+  def execute_config_show_command(self, command, device):
+    error = device.check_device_connection()
+    android_sdk_version = ANDROID_SDK_VERSION_T
+    if error is None:
+      device.root_device()
+      android_sdk_version = device.get_android_sdk_version()
+    config, error = PREDEFINED_PERFETTO_CONFIGS[command.config_name](
+        command, android_sdk_version)
+
+    if error is not None:
+      return error
+    print("\n".join(config.strip().split("\n")[2:-2]))
     return None
