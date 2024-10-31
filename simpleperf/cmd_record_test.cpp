@@ -1079,6 +1079,7 @@ TEST(record_cmd, cs_etm_event) {
   ASSERT_TRUE(has_auxtrace_info);
   ASSERT_TRUE(has_auxtrace);
   ASSERT_TRUE(has_aux);
+  ASSERT_TRUE(!reader->ReadBuildIdFeature().empty());
 }
 
 // @CddTest = 6.1/C-0-2
