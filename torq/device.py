@@ -14,14 +14,17 @@
 # limitations under the License.
 #
 
-import subprocess
+import math
 import os
+import subprocess
 import time
+
 from validation_error import ValidationError
 
 ADB_ROOT_TIMED_OUT_LIMIT_SECS = 5
+ADB_BOOT_COMPLETED_TIMED_OUT_LIMIT_SECS = 30
 POLLING_INTERVAL_SECS = 0.5
-
+SIMPLEPERF_TRACE_FILE = "/data/misc/perfetto-traces/perf.data"
 
 class AdbDevice:
   """
@@ -104,6 +107,16 @@ class AdbDevice:
                              "trace.perfetto-trace %s"
                              % (self.serial, config)), shell=True)
 
+  def start_simpleperf_trace(self, command):
+    events_param = "-e " + ",".join(command.simpleperf_event)
+    return subprocess.Popen(("adb -s %s shell simpleperf record -a -f 1000 "
+                             "--post-unwind=yes -m 8192 -g --duration %d"
+                             " %s -o %s"
+                             % (self.serial,
+                                int(math.ceil(command.dur_ms/1000)),
+                                events_param, SIMPLEPERF_TRACE_FILE)),
+                            shell=True)
+
   def pull_file(self, file_path, host_file):
     subprocess.run(["adb", "-s", self.serial, "pull", file_path, host_file])
 
@@ -133,29 +146,103 @@ class AdbDevice:
     subprocess.run(["adb", "-s", self.serial, "shell", "am", "switch-user",
                     str(user)])
 
-  def get_num_cpus(self):
-    raise NotImplementedError
+  def write_to_file(self, file_path, host_file_string):
+    subprocess.run(("adb -s %s shell 'cat > %s %s'"
+                    % (self.serial, file_path, host_file_string)), shell=True)
 
-  def get_memory(self):
-    raise NotImplementedError
+  def set_prop(self, prop, value):
+    subprocess.run(["adb", "-s", self.serial, "shell", "setprop", prop, value])
 
-  def get_max_num_cpus(self):
-    raise NotImplementedError
+  def reboot(self):
+    subprocess.run(["adb", "-s", self.serial, "reboot"])
 
-  def get_max_memory(self):
-    raise NotImplementedError
+  def wait_for_device(self):
+    subprocess.run(["adb", "-s", self.serial, "wait-for-device"])
 
-  def set_hw_config(self, hw_config):
-    raise NotImplementedError
+  def is_boot_completed(self):
+    command_output = subprocess.run(["adb", "-s", self.serial, "shell",
+                                     "getprop", "sys.boot_completed"],
+                                    capture_output=True)
+    return command_output.stdout.decode("utf-8").strip() == "1"
 
-  def set_num_cpus(self, num_cpus):
-    raise NotImplementedError
+  def wait_for_boot_to_complete(self):
+    if not self.poll_is_task_completed(ADB_BOOT_COMPLETED_TIMED_OUT_LIMIT_SECS,
+                                       POLLING_INTERVAL_SECS,
+                                       self.is_boot_completed):
+      raise Exception(("Device with serial %s took too long to finish"
+                       " rebooting." % self.serial))
 
-  def set_memory(self, memory):
-    raise NotImplementedError
+  def get_packages(self):
+    return [package.removeprefix("package:") for package in subprocess.run(
+        ["adb", "-s", self.serial, "shell", "pm", "list", "packages"],
+        capture_output=True).stdout.decode("utf-8").splitlines()]
 
-  def app_exists(self, app):
-    raise NotImplementedError
+  def get_pid(self, package):
+    return subprocess.run("adb -s %s shell pidof %s" % (self.serial, package),
+                          shell=True, capture_output=True
+                          ).stdout.decode("utf-8").split("\n")[0]
 
-  def simpleperf_event_exists(self, simpleperf_event):
-    raise NotImplementedError
+  def is_package_running(self, package):
+    return self.get_pid(package) != ""
+
+  def start_package(self, package):
+    if subprocess.run(
+        ["adb", "-s", self.serial, "shell", "am", "start", package],
+        capture_output=True).stderr.decode("utf-8").split("\n")[0] != "":
+      return ValidationError(("Cannot start package %s on device with"
+                              " serial %s because %s is a service package,"
+                              " which doesn't implement a MAIN activity."
+                              % (package, self.serial, package)), None)
+    return None
+
+  def kill_pid(self, package):
+    pid = self.get_pid(package)
+    if pid != "":
+      subprocess.run(["adb", "-s", self.serial, "shell", "kill", "-9", pid])
+
+  def force_stop_package(self, package):
+    subprocess.run(["adb", "-s", self.serial, "shell", "am", "force-stop",
+                    package])
+
+  def get_prop(self, prop):
+    return subprocess.run(
+        ["adb", "-s", self.serial, "shell", "getprop", prop],
+        capture_output=True).stdout.decode("utf-8").split("\n")[0]
+
+  def get_android_sdk_version(self):
+    return int(self.get_prop("ro.build.version.sdk"))
+
+  def simpleperf_event_exists(self, simpleperf_events):
+    events_copy = simpleperf_events.copy()
+    grep_command = "grep"
+    for event in simpleperf_events:
+      grep_command += " -e " + event.lower()
+
+    output = subprocess.run(["adb", "-s", self.serial, "shell",
+                             "simpleperf", "list", "|", grep_command],
+                            capture_output=True)
+
+    if output is None or len(output.stdout) == 0:
+      raise Exception("Error while validating simpleperf events.")
+    lines = output.stdout.decode("utf-8").split("\n")
+
+    # Anything that does not start with two spaces is not a command.
+    # Any command with a space will have the command before the first space.
+    for line in lines:
+      if len(line) <= 3 or line[:2] != "  " or line[2] == "#":
+        # Line doesn't contain a simpleperf event
+        continue
+      event = line[2:].split(" ")[0]
+      if event in events_copy:
+        events_copy.remove(event)
+        if len(events_copy) == 0:
+          # All of the events exist, exit early
+          break
+
+    if len(events_copy) > 0:
+      return ValidationError("The following simpleperf event(s) are invalid:"
+                             " %s."
+                             % events_copy,
+                             "Run adb shell simpleperf list to"
+                             " see valid simpleperf events.")
+    return None
