@@ -102,6 +102,22 @@ TEST(cmd_inject, output_option) {
   std::string autofdo_data;
   ASSERT_TRUE(RunInjectCmd({"-i", tmpfile.path, "--output", "autofdo"}, &autofdo_data));
   CheckMatchingExpectedData("perf_inject.data", autofdo_data);
+  std::string bolt_data;
+  ASSERT_TRUE(RunInjectCmd({"-i", tmpfile.path, "--output", "bolt"}, &bolt_data));
+  CheckMatchingExpectedData("perf_inject_bolt.data", bolt_data);
+}
+
+// @CddTest = 6.1/C-0-2
+TEST(cmd_inject, compress_option) {
+  TemporaryFile tmpfile;
+  close(tmpfile.release());
+  ASSERT_FALSE(RunInjectCmd({"--output", "branch-list", "-z", "-o", tmpfile.path}));
+  std::string tmp_zstd_path = std::string(tmpfile.path) + ".zst";
+  ASSERT_TRUE(RunInjectCmd({"--output", "branch-list", "-z", "-o", tmp_zstd_path}));
+  std::string autofdo_data;
+  ASSERT_TRUE(RunInjectCmd({"-i", tmp_zstd_path.c_str(), "--output", "autofdo"}, &autofdo_data));
+  CheckMatchingExpectedData("perf_inject.data", autofdo_data);
+  unlink(tmp_zstd_path.c_str());
 }
 
 // @CddTest = 6.1/C-0-2
@@ -185,6 +201,13 @@ TEST(cmd_inject, merge_branch_list_files) {
   std::string autofdo_data;
   ASSERT_TRUE(RunInjectCmd({"-i", tmpfile2.path, "--output", "autofdo"}, &autofdo_data));
   ASSERT_NE(autofdo_data.find("106c->1074:200"), std::string::npos);
+
+  // Accept invalid branch list files.
+  TemporaryFile tmpfile3;
+  close(tmpfile3.release());
+  ASSERT_TRUE(android::base::WriteStringToFile("bad content", tmpfile3.path));
+  ASSERT_TRUE(RunInjectCmd({"-i", std::string(tmpfile.path) + "," + tmpfile3.path, "--output",
+                            "branch-list", "-o", tmpfile2.path}));
 }
 
 // @CddTest = 6.1/C-0-2
@@ -239,9 +262,14 @@ TEST(cmd_inject, accept_missing_aux_data) {
 // @CddTest = 6.1/C-0-2
 TEST(cmd_inject, read_lbr_data) {
   // Convert perf.data to AutoFDO text format.
-  std::string perf_data_path = GetTestData("lbr/perf_lbr.data");
+  auto get_autofdo_data = [&](std::vector<std::string>&& args, std::string* data) {
+    args.insert(args.end(), {"--symdir", GetTestDataDir() + "lbr", "--allow-mismatched-build-id"});
+    return RunInjectCmd(std::move(args), data);
+  };
+
+  const std::string perf_data_path = GetTestData("lbr/perf_lbr.data");
   std::string data;
-  ASSERT_TRUE(RunInjectCmd({"-i", perf_data_path}, &data));
+  ASSERT_TRUE(get_autofdo_data({"-i", perf_data_path}, &data));
   data.erase(std::remove(data.begin(), data.end(), '\r'), data.end());
 
   std::string expected_data;
@@ -255,25 +283,26 @@ TEST(cmd_inject, read_lbr_data) {
   close(branch_list_file.release());
   ASSERT_TRUE(
       RunInjectCmd({"-i", perf_data_path, "--output", "branch-list", "-o", branch_list_file.path}));
-  ASSERT_TRUE(RunInjectCmd({"-i", branch_list_file.path}, &data));
+  ASSERT_TRUE(get_autofdo_data({"-i", branch_list_file.path}, &data));
   ASSERT_EQ(data, expected_data);
 
   // Test binary filter on LBR data.
-  ASSERT_TRUE(RunInjectCmd({"-i", perf_data_path, "--binary", "no_lbr_test_loop"}, &data));
+  ASSERT_TRUE(get_autofdo_data({"-i", perf_data_path, "--binary", "no_lbr_test_loop"}, &data));
   ASSERT_EQ(data.find("lbr_test_loop"), data.npos);
 
   // Test binary filter on branch list file.
-  ASSERT_TRUE(RunInjectCmd({"-i", branch_list_file.path, "--binary", "no_lbr_test_loop"}, &data));
+  ASSERT_TRUE(
+      get_autofdo_data({"-i", branch_list_file.path, "--binary", "no_lbr_test_loop"}, &data));
   ASSERT_EQ(data.find("lbr_test_loop"), data.npos);
 
   // Test multiple input files.
-  ASSERT_TRUE(RunInjectCmd(
+  ASSERT_TRUE(get_autofdo_data(
       {
           "-i",
           std::string(branch_list_file.path) + "," + branch_list_file.path,
       },
       &data));
-  ASSERT_NE(data.find("194d->1940:706"), data.npos);
+  ASSERT_NE(data.find("94d->940:706"), data.npos);
 }
 
 // @CddTest = 6.1/C-0-2
@@ -285,4 +314,29 @@ TEST(cmd_inject, inject_small_binary) {
   std::string perf_data = GetTestData("etm/perf_for_small_binary.data");
   ASSERT_TRUE(RunInjectCmd({"-i", perf_data}, &data));
   CheckMatchingExpectedData("perf_inject_small.data", data);
+
+  ASSERT_TRUE(RunInjectCmd({"-i", perf_data, "--output", "bolt"}, &data));
+  CheckMatchingExpectedData("perf_inject_small_bolt.data", data);
+}
+
+// @CddTest = 6.1/C-0-2
+TEST(cmd_inject, j_option) {
+  TemporaryFile tmpfile;
+  close(tmpfile.release());
+  ASSERT_TRUE(RunInjectCmd({"--output", "branch-list", "-o", tmpfile.path}));
+  std::string autofdo_data;
+  ASSERT_TRUE(RunInjectCmd(
+      {"-i", std::string(tmpfile.path) + "," + tmpfile.path, "--output", "autofdo", "-j", "1"},
+      &autofdo_data));
+  ASSERT_NE(autofdo_data.find("106c->1074:200"), std::string::npos);
+
+  ASSERT_TRUE(RunInjectCmd(
+      {"-i", std::string(tmpfile.path) + "," + tmpfile.path, "--output", "autofdo", "-j", "2"},
+      &autofdo_data));
+  ASSERT_NE(autofdo_data.find("106c->1074:200"), std::string::npos);
+
+  // Invalid job count.
+  ASSERT_FALSE(RunInjectCmd(
+      {"-i", std::string(tmpfile.path) + "," + tmpfile.path, "--output", "autofdo", "-j", "0"},
+      &autofdo_data));
 }
