@@ -111,13 +111,10 @@ TEST(cmd_inject, output_option) {
 TEST(cmd_inject, compress_option) {
   TemporaryFile tmpfile;
   close(tmpfile.release());
-  ASSERT_FALSE(RunInjectCmd({"--output", "branch-list", "-z", "-o", tmpfile.path}));
-  std::string tmp_zstd_path = std::string(tmpfile.path) + ".zst";
-  ASSERT_TRUE(RunInjectCmd({"--output", "branch-list", "-z", "-o", tmp_zstd_path}));
+  ASSERT_TRUE(RunInjectCmd({"--output", "branch-list", "-z", "-o", tmpfile.path}));
   std::string autofdo_data;
-  ASSERT_TRUE(RunInjectCmd({"-i", tmp_zstd_path.c_str(), "--output", "autofdo"}, &autofdo_data));
+  ASSERT_TRUE(RunInjectCmd({"-i", tmpfile.path, "--output", "autofdo"}, &autofdo_data));
   CheckMatchingExpectedData("perf_inject.data", autofdo_data);
-  unlink(tmp_zstd_path.c_str());
 }
 
 // @CddTest = 6.1/C-0-2

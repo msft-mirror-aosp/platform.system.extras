@@ -522,20 +522,13 @@ class BranchListReader {
   void AddCallback(const LBRDataCallback& callback) { lbr_data_callback_ = callback; }
 
   bool Read() {
-    std::string s;
-    if (!android::base::ReadFileToString(filename_, &s)) {
-      PLOG(ERROR) << "failed to read " << filename_;
+    auto reader = BranchListProtoReader::CreateForFile(filename_);
+    if (!reader) {
       return false;
-    }
-    if (android::base::EndsWith(filename_, ".zst")) {
-      if (!ZstdDecompress(s.data(), s.size(), s)) {
-        return false;
-      }
     }
     ETMBinaryMap etm_data;
     LBRData lbr_data;
-    if (!ParseBranchListData(s, etm_data, lbr_data)) {
-      PLOG(ERROR) << "file is in wrong format: " << filename_;
+    if (!reader->Read(etm_data, lbr_data)) {
       return false;
     }
     if (etm_binary_callback_ && !etm_data.empty()) {
@@ -985,28 +978,19 @@ class BranchListMergedReader {
 // Write branch lists to a protobuf file specified by branch_list.proto.
 static bool WriteBranchListFile(const std::string& output_filename, const ETMBinaryMap& etm_data,
                                 const LBRData& lbr_data, bool compress) {
-  std::string s;
+  auto writer = BranchListProtoWriter::CreateForFile(output_filename, compress);
+  if (!writer) {
+    return false;
+  }
   if (!etm_data.empty()) {
-    if (!ETMBinaryMapToString(etm_data, s)) {
-      return false;
-    }
-  } else if (!lbr_data.samples.empty()) {
-    if (!LBRDataToString(lbr_data, s)) {
-      return false;
-    }
-  } else {
-    // Don't produce empty output file.
-    LOG(INFO) << "Skip empty output file.";
-    unlink(output_filename.c_str());
-    return true;
+    return writer->Write(etm_data);
   }
-  if (compress && !ZstdCompress(s.data(), s.size(), s)) {
-    return false;
+  if (!lbr_data.samples.empty()) {
+    return writer->Write(lbr_data);
   }
-  if (!android::base::WriteStringToFile(s, output_filename)) {
-    PLOG(ERROR) << "failed to write to " << output_filename;
-    return false;
-  }
+  // Don't produce empty output file.
+  LOG(INFO) << "Skip empty output file.";
+  unlink(output_filename.c_str());
   return true;
 }
 
@@ -1155,11 +1139,6 @@ class InjectCommand : public Command {
     }
     compress_ = options.PullBoolValue("-z");
     CHECK(options.values.empty());
-
-    if (compress_ && !android::base::EndsWith(output_filename_, ".zst")) {
-      LOG(ERROR) << "When -z is used, output filename should has a .zst suffix";
-      return false;
-    }
     return true;
   }
 
