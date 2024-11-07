@@ -367,27 +367,27 @@ class AdbHelper(object):
 
     def get_android_version(self) -> int:
         """ Get Android version on device, like 7 is for Android N, 8 is for Android O."""
-        android_version = 0
-
-        def parse_version(s: str):
+        def parse_version(s: str) -> int:
             if not s:
-                return
+                return 0
             if s[0].isdigit():
                 i = 1
                 while i < len(s) and s[i].isdigit():
                     i += 1
-                android_version = int(s[:i])
+                return int(s[:i])
             else:
                 c = s[0].upper()
                 if c.isupper() and 'L' <= c <= 'V':
-                    android_version = ord(c) - ord('L') + 5
+                    return ord(c) - ord('L') + 5
+            return 0
 
+        android_version = 0
         s = self.get_property('ro.build.version.codename')
         if s != 'REL':
-            parse_version(s)
+            android_version = parse_version(s)
         if android_version == 0:
             s = self.get_property('ro.build.version.release')
-            parse_version(s)
+            android_version = parse_version(s)
         if android_version == 0:
             s = self.get_property('ro.build.version.sdk')
             if int(s) >= 35:
