@@ -661,4 +661,73 @@ bool BranchListProtoReader::ReadOldFileFormat(ETMBinaryMap& etm_data, LBRData& l
   return true;
 }
 
+bool DumpBranchListFile(std::string filename) {
+  ETMBinaryMap etm_data;
+  LBRData lbr_data;
+  auto reader = BranchListProtoReader::CreateForFile(filename);
+  if (!reader || !reader->Read(etm_data, lbr_data)) {
+    return false;
+  }
+
+  if (!etm_data.empty()) {
+    std::vector<BinaryKey> sorted_keys;
+    for (const auto& [key, _] : etm_data) {
+      sorted_keys.emplace_back(key);
+    }
+    std::sort(sorted_keys.begin(), sorted_keys.end(),
+              [](const BinaryKey& key1, const BinaryKey& key2) { return key1.path < key2.path; });
+    PrintIndented(0, "etm_data:\n");
+    for (size_t i = 0; i < sorted_keys.size(); ++i) {
+      const auto& key = sorted_keys[i];
+      const auto& binary = etm_data[key];
+      PrintIndented(1, "binary[%zu].path: %s\n", i, key.path.c_str());
+      PrintIndented(1, "binary[%zu].build_id: %s\n", i, key.build_id.ToString().c_str());
+      PrintIndented(1, "binary[%zu].binary_type: %s\n", i, DsoTypeToString(binary.dso_type));
+      if (binary.dso_type == DSO_KERNEL) {
+        PrintIndented(1, "binary[%zu].kernel_start_addr: 0x%" PRIx64 "\n", i,
+                      key.kernel_start_addr);
+      }
+      PrintIndented(1, "binary[%zu].addrs:\n", i);
+      size_t addr_id = 0;
+      for (const auto& [addr, branches] : binary.GetOrderedBranchMap()) {
+        PrintIndented(2, "addr[%zu]: 0x%" PRIx64 "\n", addr_id++, addr);
+        size_t branch_id = 0;
+        for (const auto& [branch, count] : branches) {
+          std::string s = "0b";
+          for (auto it = branch.rbegin(); it != branch.rend(); ++it) {
+            s.push_back(*it ? '1' : '0');
+          }
+          PrintIndented(3, "branch[%zu].branch: %s\n", branch_id, s.c_str());
+          PrintIndented(3, "branch[%zu].count: %" PRIu64 "\n", branch_id, count);
+          ++branch_id;
+        }
+      }
+    }
+  }
+  if (!lbr_data.samples.empty()) {
+    PrintIndented(0, "lbr_data:\n");
+    for (size_t i = 0; i < lbr_data.samples.size(); ++i) {
+      const auto& sample = lbr_data.samples[i];
+      PrintIndented(1, "sample[%zu].binary_id: %u\n", i, sample.binary_id);
+      PrintIndented(1, "sample[%zu].vaddr_in_file: 0x%" PRIx64 "\n", i, sample.vaddr_in_file);
+      PrintIndented(1, "sample[%zu].branches:\n", i);
+      for (size_t j = 0; j < sample.branches.size(); ++j) {
+        const auto& branch = sample.branches[j];
+        PrintIndented(2, "branch[%zu].from_binary_id: %u\n", j, branch.from_binary_id);
+        PrintIndented(2, "branch[%zu].from_vaddr_in_file: 0x%" PRIx64 "\n", j,
+                      branch.from_vaddr_in_file);
+        PrintIndented(2, "branch[%zu].to_binary_id: %u\n", j, branch.to_binary_id);
+        PrintIndented(2, "branch[%zu].to_vaddr_in_file: 0x%" PRIx64 "\n", j,
+                      branch.to_vaddr_in_file);
+      }
+    }
+    for (size_t i = 0; i < lbr_data.binaries.size(); ++i) {
+      const auto& binary = lbr_data.binaries[i];
+      PrintIndented(1, "binary[%zu].path: %s\n", i, binary.path.c_str());
+      PrintIndented(1, "binary[%zu].build_id: %s\n", i, binary.build_id.ToString().c_str());
+    }
+  }
+  return true;
+}
+
 }  // namespace simpleperf

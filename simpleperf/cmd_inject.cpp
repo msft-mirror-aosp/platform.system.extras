@@ -1018,6 +1018,7 @@ class InjectCommand : public Command {
 "--allow-mismatched-build-id  Allow mismatched build ids when searching for debug binaries.\n"
 "-j <jobs>                    Use multiple threads to process branch list files.\n"
 "-z                           Compress branch-list output\n"
+"--dump <file>                Dump a branch list file.\n"
 "\n"
 "Examples:\n"
 "1. Generate autofdo text output.\n"
@@ -1033,6 +1034,9 @@ class InjectCommand : public Command {
     GOOGLE_PROTOBUF_VERIFY_VERSION;
     if (!ParseOptions(args)) {
       return false;
+    }
+    if (!dump_branch_list_file_.empty()) {
+      return DumpBranchListFile(dump_branch_list_file_);
     }
 
     CHECK(!input_filenames_.empty());
@@ -1062,6 +1066,7 @@ class InjectCommand : public Command {
     const OptionFormatMap option_formats = {
         {"--allow-mismatched-build-id", {OptionValueType::NONE, OptionType::SINGLE}},
         {"--binary", {OptionValueType::STRING, OptionType::SINGLE}},
+        {"--dump", {OptionValueType::STRING, OptionType::SINGLE}},
         {"--dump-etm", {OptionValueType::STRING, OptionType::SINGLE}},
         {"--exclude-perf", {OptionValueType::NONE, OptionType::SINGLE}},
         {"-i", {OptionValueType::STRING, OptionType::MULTIPLE}},
@@ -1087,6 +1092,7 @@ class InjectCommand : public Command {
         return false;
       }
     }
+    options.PullStringValue("--dump", &dump_branch_list_file_);
     if (auto value = options.PullValue("--dump-etm"); value) {
       if (!ParseEtmDumpOption(value->str_value, &etm_dump_option_)) {
         return false;
@@ -1292,6 +1298,7 @@ class InjectCommand : public Command {
   bool compress_ = false;
   bool allow_mismatched_build_id_ = false;
   size_t jobs_ = 1;
+  std::string dump_branch_list_file_;
 
   std::unique_ptr<Dso> placeholder_dso_;
 };

@@ -235,6 +235,8 @@ class BranchListProtoReader {
   bool compress_ = false;
 };
 
+bool DumpBranchListFile(std::string filename);
+
 // for testing
 std::string ETMBranchToProtoString(const std::vector<bool>& branch);
 std::vector<bool> ProtoStringToETMBranch(const std::string& s, size_t bit_size);

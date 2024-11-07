@@ -337,3 +337,25 @@ TEST(cmd_inject, j_option) {
       {"-i", std::string(tmpfile.path) + "," + tmpfile.path, "--output", "autofdo", "-j", "0"},
       &autofdo_data));
 }
+
+// @CddTest = 6.1/C-0-2
+TEST(cmd_inject, dump_option) {
+  TemporaryFile tmpfile;
+  close(tmpfile.release());
+  ASSERT_TRUE(RunInjectCmd({"--output", "branch-list", "-o", tmpfile.path}));
+
+  CaptureStdout capture;
+  ASSERT_TRUE(capture.Start());
+  ASSERT_TRUE(InjectCmd()->Run({"--dump", tmpfile.path}));
+  std::string data = capture.Finish();
+  ASSERT_NE(data.find("binary[0].build_id: 0x0c9a20bf9c009d0e4e8bbf9fad0300ae00000000"),
+            std::string::npos);
+
+  ASSERT_TRUE(RunInjectCmd(
+      {"--output", "branch-list", "-o", tmpfile.path, "-i", GetTestData("lbr/perf_lbr.data")}));
+
+  ASSERT_TRUE(capture.Start());
+  ASSERT_TRUE(InjectCmd()->Run({"--dump", tmpfile.path}));
+  data = capture.Finish();
+  ASSERT_NE(data.find("binary[0].path: /home/yabinc/lbr_test_loop"), std::string::npos);
+}
