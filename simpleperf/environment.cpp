@@ -918,18 +918,33 @@ int GetAndroidVersion() {
   static int android_version = -1;
   if (android_version == -1) {
     android_version = 0;
+
+    auto parse_version = [&](const std::string& s) {
+      // The release string can be a list of numbers (like 8.1.0), a character (like Q)
+      // or many characters (like OMR1).
+      if (!s.empty()) {
+        // Each Android version has a version number: L is 5, M is 6, N is 7, O is 8, etc.
+        if (s[0] >= 'L' && s[0] <= 'V') {
+          android_version = s[0] - 'P' + kAndroidVersionP;
+        } else if (isdigit(s[0])) {
+          sscanf(s.c_str(), "%d", &android_version);
+        }
+      }
+    };
     std::string s = android::base::GetProperty("ro.build.version.codename", "REL");
-    if (s == "REL") {
-      s = android::base::GetProperty("ro.build.version.release", "");
+    if (s != "REL") {
+      parse_version(s);
     }
-    // The release string can be a list of numbers (like 8.1.0), a character (like Q)
-    // or many characters (like OMR1).
-    if (!s.empty()) {
-      // Each Android version has a version number: L is 5, M is 6, N is 7, O is 8, etc.
-      if (s[0] >= 'A' && s[0] <= 'Z') {
-        android_version = s[0] - 'P' + kAndroidVersionP;
-      } else if (isdigit(s[0])) {
-        sscanf(s.c_str(), "%d", &android_version);
+    if (android_version == 0) {
+      s = android::base::GetProperty("ro.build.version.release", "");
+      parse_version(s);
+    }
+    if (android_version == 0) {
+      s = android::base::GetProperty("ro.build.version.sdk", "");
+      int sdk_version = 0;
+      const int SDK_VERSION_V = 35;
+      if (sscanf(s.c_str(), "%d", &sdk_version) == 1 && sdk_version >= SDK_VERSION_V) {
+        android_version = kAndroidVersionV;
       }
     }
   }
