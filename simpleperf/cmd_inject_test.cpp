@@ -359,3 +359,14 @@ TEST(cmd_inject, dump_option) {
   data = capture.Finish();
   ASSERT_NE(data.find("binary[0].path: /home/yabinc/lbr_test_loop"), std::string::npos);
 }
+
+// @CddTest = 6.1/C-0-2
+TEST(cmd_inject, exclude_process_name_option) {
+  TemporaryFile tmpfile;
+  close(tmpfile.release());
+  ASSERT_TRUE(RunInjectCmd(
+      {"--output", "branch-list", "--exclude-process-name", "etm_test_loop", "-o", tmpfile.path}));
+  struct stat st;
+  ASSERT_EQ(stat(tmpfile.path, &st), -1);
+  ASSERT_EQ(errno, ENOENT);
+}

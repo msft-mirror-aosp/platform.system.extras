@@ -221,14 +221,17 @@ class PerfDataReader {
 
 class ETMThreadTreeWithFilter : public ETMThreadTree {
  public:
-  ETMThreadTreeWithFilter(ThreadTree& thread_tree, std::optional<int>& exclude_pid)
-      : thread_tree_(thread_tree), exclude_pid_(exclude_pid) {}
+  ETMThreadTreeWithFilter(ThreadTree& thread_tree, std::optional<int>& exclude_pid,
+                          const std::vector<std::unique_ptr<RegEx>>& exclude_process_names)
+      : thread_tree_(thread_tree),
+        exclude_pid_(exclude_pid),
+        exclude_process_names_(exclude_process_names) {}
 
   void DisableThreadExitRecords() override { thread_tree_.DisableThreadExitRecords(); }
 
   const ThreadEntry* FindThread(int tid) override {
     const ThreadEntry* thread = thread_tree_.FindThread(tid);
-    if (thread != nullptr && exclude_pid_ && thread->pid == exclude_pid_) {
+    if (thread != nullptr && ShouldExcludePid(thread->pid)) {
       return nullptr;
     }
     return thread;
@@ -237,18 +240,37 @@ class ETMThreadTreeWithFilter : public ETMThreadTree {
   const MapSet& GetKernelMaps() override { return thread_tree_.GetKernelMaps(); }
 
  private:
+  bool ShouldExcludePid(int pid) {
+    if (exclude_pid_ && pid == exclude_pid_) {
+      return true;
+    }
+    if (!exclude_process_names_.empty()) {
+      const ThreadEntry* process = thread_tree_.FindThread(pid);
+      if (process != nullptr) {
+        for (const auto& regex : exclude_process_names_) {
+          if (regex->Search(process->comm)) {
+            return true;
+          }
+        }
+      }
+    }
+    return false;
+  }
+
   ThreadTree& thread_tree_;
   std::optional<int>& exclude_pid_;
+  const std::vector<std::unique_ptr<RegEx>>& exclude_process_names_;
 };
 
 // Read perf.data with ETM data and generate AutoFDO or branch list data.
 class ETMPerfDataReader : public PerfDataReader {
  public:
   ETMPerfDataReader(std::unique_ptr<RecordFileReader> reader, bool exclude_perf,
+                    const std::vector<std::unique_ptr<RegEx>>& exclude_process_names,
                     const RegEx* binary_name_regex, ETMDumpOption etm_dump_option)
       : PerfDataReader(std::move(reader), exclude_perf, binary_name_regex),
         etm_dump_option_(etm_dump_option),
-        etm_thread_tree_(thread_tree_, exclude_pid_) {}
+        etm_thread_tree_(thread_tree_, exclude_pid_, exclude_process_names) {}
 
   bool Read() override {
     if (reader_->HasFeature(PerfFileFormat::FEAT_ETM_BRANCH_LIST)) {
@@ -1014,6 +1036,8 @@ class InjectCommand : public Command {
 "                             Default is autofdo.\n"
 "--dump-etm type1,type2,...   Dump etm data. A type is one of raw, packet and element.\n"
 "--exclude-perf               Exclude trace data for the recording process.\n"
+"--exclude-process-name process_name_regex      Exclude data for processes with name containing\n"
+"                                               the regular expression.\n"
 "--symdir <dir>               Look for binaries in a directory recursively.\n"
 "--allow-mismatched-build-id  Allow mismatched build ids when searching for debug binaries.\n"
 "-j <jobs>                    Use multiple threads to process branch list files.\n"
@@ -1069,6 +1093,7 @@ class InjectCommand : public Command {
         {"--dump", {OptionValueType::STRING, OptionType::SINGLE}},
         {"--dump-etm", {OptionValueType::STRING, OptionType::SINGLE}},
         {"--exclude-perf", {OptionValueType::NONE, OptionType::SINGLE}},
+        {"--exclude-process-name", {OptionValueType::STRING, OptionType::MULTIPLE}},
         {"-i", {OptionValueType::STRING, OptionType::MULTIPLE}},
         {"-j", {OptionValueType::UINT, OptionType::SINGLE}},
         {"-o", {OptionValueType::STRING, OptionType::SINGLE}},
@@ -1099,6 +1124,13 @@ class InjectCommand : public Command {
       }
     }
     exclude_perf_ = options.PullBoolValue("--exclude-perf");
+    for (const std::string& value : options.PullStringValues("--exclude-process-name")) {
+      std::unique_ptr<RegEx> regex = RegEx::Create(value);
+      if (regex == nullptr) {
+        return false;
+      }
+      exclude_process_names_.emplace_back(std::move(regex));
+    }
 
     for (const OptionValue& value : options.PullValues("-i")) {
       std::vector<std::string> files = android::base::Split(value.str_value, ",");
@@ -1180,7 +1212,8 @@ class InjectCommand : public Command {
       std::unique_ptr<PerfDataReader> reader;
       if (data_type == "etm") {
         reader.reset(new ETMPerfDataReader(std::move(file_reader), exclude_perf_,
-                                           binary_name_regex_.get(), etm_dump_option_));
+                                           exclude_process_names_, binary_name_regex_.get(),
+                                           etm_dump_option_));
       } else if (data_type == "lbr") {
         reader.reset(
             new LBRPerfDataReader(std::move(file_reader), exclude_perf_, binary_name_regex_.get()));
@@ -1291,6 +1324,7 @@ class InjectCommand : public Command {
 
   std::unique_ptr<RegEx> binary_name_regex_;
   bool exclude_perf_ = false;
+  std::vector<std::unique_ptr<RegEx>> exclude_process_names_;
   std::vector<std::string> input_filenames_;
   std::string output_filename_ = "perf_inject.data";
   OutputFormat output_format_ = OutputFormat::AutoFDO;
