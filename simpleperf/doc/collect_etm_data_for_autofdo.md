@@ -245,7 +245,7 @@ section for more information.
 -rw-r--r-- 1 yabinc primarygroup 1.3M Oct 17 16:39 kernel.autofdo
 # Convert the AutoFDO profile to the LLVM profile format:
 (host) $ create_llvm_prof --profiler text --binary=vmlinux --profile=kernel.autofdo \
-				--out=kernel.llvm_profdata --format binary
+				--out=kernel.llvm_profdata --format extbinary
 (host) $ ls -lh kernel.llvm_profdata
 -rw-r--r-- 1 yabinc primarygroup 1.4M Oct 17 19:00 kernel.llvm_profdata
 ```
