@@ -15,6 +15,7 @@
 #
 
 import datetime
+import subprocess
 import time
 from abc import ABC, abstractmethod
 from config_builder import PREDEFINED_PERFETTO_CONFIGS, build_custom_config
@@ -200,26 +201,27 @@ class ConfigCommandExecutor(CommandExecutor):
       case "config list":
         print("\n".join(list(PREDEFINED_PERFETTO_CONFIGS.keys())))
         return None
-      case "config show":
-        return self.execute_config_show_command(command, device)
-      case "config pull":
-        return self.execute_config_pull_command(command)
+      case "config show" | "config pull":
+        return self.execute_config_command(command, device)
       case _:
         raise ValueError("Invalid config subcommand was used.")
 
-  def execute_config_pull_command(self, command):
-    return None
-
-  def execute_config_show_command(self, command, device):
-    error = device.check_device_connection()
+  def execute_config_command(self, command, device):
     android_sdk_version = ANDROID_SDK_VERSION_T
+    error = device.check_device_connection()
     if error is None:
       device.root_device()
       android_sdk_version = device.get_android_sdk_version()
+
     config, error = PREDEFINED_PERFETTO_CONFIGS[command.config_name](
         command, android_sdk_version)
 
     if error is not None:
       return error
-    print("\n".join(config.strip().split("\n")[2:-2]))
+
+    if command.get_type() == "config pull":
+      subprocess.run(("cat > %s %s" % (command.file_path, config)), shell=True)
+    else:
+      print("\n".join(config.strip().split("\n")[2:-2]))
+
     return None
