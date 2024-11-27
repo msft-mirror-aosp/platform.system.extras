@@ -19,7 +19,6 @@
 use std::fs;
 use std::mem;
 use std::path::Path;
-use std::sync::mpsc::{sync_channel, SyncSender};
 use std::sync::Arc;
 use std::sync::Mutex;
 use std::thread;
@@ -27,12 +26,9 @@ use std::time::{Duration, Instant};
 
 use crate::config::{get_sampling_period, Config, LOG_FILE, PROFILE_OUTPUT_DIR, TRACE_OUTPUT_DIR};
 use crate::trace_provider::{self, TraceProvider};
-use anyhow::{anyhow, ensure, Context, Result};
+use anyhow::{anyhow, Context, Result};
 
 pub struct Scheduler {
-    /// Signal to terminate the periodic collection worker thread, None if periodic collection is
-    /// not scheduled.
-    termination_ch: Option<SyncSender<()>>,
     /// The preferred trace provider for the system.
     trace_provider: Arc<Mutex<dyn TraceProvider + Send>>,
     provider_ready_callbacks: Arc<Mutex<Vec<Box<dyn FnOnce() + Send>>>>,
@@ -43,55 +39,9 @@ impl Scheduler {
         let p = trace_provider::get_trace_provider()?;
         p.lock().map_err(|e| anyhow!(e.to_string()))?.set_log_file(&LOG_FILE);
         Ok(Scheduler {
-            termination_ch: None,
             trace_provider: p,
             provider_ready_callbacks: Arc::new(Mutex::new(Vec::new())),
         })
-    }
-
-    fn is_scheduled(&self) -> bool {
-        self.termination_ch.is_some()
-    }
-
-    pub fn schedule_periodic(&mut self, config: &Config) -> Result<()> {
-        ensure!(!self.is_scheduled(), "Already scheduled.");
-
-        let (sender, receiver) = sync_channel(1);
-        self.termination_ch = Some(sender);
-
-        // Clone config and trace_provider ARC for the worker thread.
-        let config = config.clone();
-        let trace_provider = self.trace_provider.clone();
-
-        thread::spawn(move || {
-            loop {
-                match receiver.recv_timeout(config.collection_interval) {
-                    Ok(_) => break,
-                    Err(_) => {
-                        // Did not receive a termination signal, initiate trace event.
-                        if check_space_limit(&TRACE_OUTPUT_DIR, &config).unwrap() {
-                            trace_provider.lock().unwrap().trace_system(
-                                &TRACE_OUTPUT_DIR,
-                                "periodic",
-                                &get_sampling_period(),
-                                &config.binary_filter,
-                            );
-                        }
-                    }
-                }
-            }
-        });
-        Ok(())
-    }
-
-    pub fn terminate_periodic(&mut self) -> Result<()> {
-        self.termination_ch
-            .as_ref()
-            .ok_or_else(|| anyhow!("Not scheduled"))?
-            .send(())
-            .context("Scheduler worker disappeared.")?;
-        self.termination_ch = None;
-        Ok(())
     }
 
     pub fn trace_system(&self, config: &Config, tag: &str) -> Result<()> {
