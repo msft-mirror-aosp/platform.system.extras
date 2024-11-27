@@ -23,6 +23,7 @@ from torq import create_parser, verify_args, get_command_type,\
 
 TEST_USER_ID = 10
 TEST_PACKAGE = "com.android.contacts"
+TEST_FILE = "file.pbtxt"
 
 
 class TorqUnitTest(unittest.TestCase):
@@ -872,6 +873,25 @@ class TorqUnitTest(unittest.TestCase):
     self.assertEqual(error, None)
     self.assertEqual(args.file_path, "./memory.pbtxt")
 
+  @mock.patch.object(os.path, "isfile", autospec=True)
+  def test_verify_args_default_config_pull_invalid_filepath(self, mock_is_file):
+    mock_invalid_file_path = "mock-invalid-file-path"
+    mock_is_file.return_value = False
+    parser = self.set_up_parser(("torq.py config pull default %s"
+                                 % mock_invalid_file_path))
+
+    args = parser.parse_args()
+    args, error = verify_args(args)
+
+    self.assertEqual(error.message, (
+        "Command is invalid because %s is not a valid filepath."
+        % mock_invalid_file_path))
+    self.assertEqual(error.suggestion, (
+        "A default filepath can be used if you do not specify a file-path:\n\t"
+        " torq pull default to copy to ./default.pbtxt\n\t"
+        " torq pull lightweight to copy to ./lightweight.pbtxt\n\t "
+        "torq pull memory to copy to ./memory.pbtxt"))
+
   def test_get_command_type_config_list(self):
     parser = self.set_up_parser("torq.py config list")
 
@@ -901,6 +921,35 @@ class TorqUnitTest(unittest.TestCase):
 
     self.assertEqual(error, None)
     self.assertEqual(command.get_type(), "config pull")
+
+  @mock.patch.object(os.path, "exists", autospec=True)
+  def test_create_parser_valid_open_subcommand(self, mock_exists):
+    mock_exists.return_value = True
+    parser = self.set_up_parser("torq.py open %s" % TEST_FILE)
+
+    args = parser.parse_args()
+    args, error = verify_args(args)
+
+    self.assertEqual(error, None)
+    self.assertEqual(args.file_path, TEST_FILE)
+
+  def test_create_parser_open_subcommand_no_file(self):
+    parser = self.set_up_parser("torq.py open")
+
+    with self.assertRaises(SystemExit):
+      parser.parse_args()
+
+  @mock.patch.object(os.path, "exists", autospec=True)
+  def test_create_parser_open_subcommand_invalid_file(self, mock_exists):
+    mock_exists.return_value = False
+    parser = self.set_up_parser("torq.py open %s" % TEST_FILE)
+
+    args = parser.parse_args()
+    args, error = verify_args(args)
+
+    self.assertEqual(error.message, "Command is invalid because %s is an "
+                                    "invalid file path." % TEST_FILE)
+    self.assertEqual(error.suggestion, "Make sure your file exists.")
 
 
 if __name__ == '__main__':
