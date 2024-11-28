@@ -16,10 +16,11 @@
 
 import argparse
 import os
-from command import ProfilerCommand, ConfigCommand
+from command import ProfilerCommand, ConfigCommand, OpenCommand
 from device import AdbDevice
 from validation_error import ValidationError
 from config_builder import PREDEFINED_PERFETTO_CONFIGS
+from utils import does_path_exist
 
 DEFAULT_DUR_MS = 10000
 MIN_DURATION_MS = 3000
@@ -102,6 +103,11 @@ def create_parser():
   config_pull_parser.add_argument('file_path', nargs='?',
                                   help=('File path to copy the predefined'
                                         ' config to'))
+  open_parser = subparsers.add_parser('open',
+                                      help=('The open subcommand is used '
+                                            'to open trace files in the '
+                                            'perfetto ui.'))
+  open_parser.add_argument('file_path', help='Path to trace file.')
   return parser
 
 
@@ -306,9 +312,22 @@ def verify_args(args):
   if args.ui is None:
     args.ui = args.runs == 1
 
-  if (args.subcommands == "config" and args.config_subcommand == "pull" and
-      args.file_path is None):
-    args.file_path = "./" + args.config_name + ".pbtxt"
+  if args.subcommands == "config" and args.config_subcommand == "pull":
+    if args.file_path is None:
+      args.file_path = "./" + args.config_name + ".pbtxt"
+    elif not os.path.isfile(args.file_path):
+      return None, ValidationError(
+          ("Command is invalid because %s is not a valid filepath."
+           % args.file_path),
+          ("A default filepath can be used if you do not specify a file-path:\n"
+           "\t torq pull default to copy to ./default.pbtxt\n"
+           "\t torq pull lightweight to copy to ./lightweight.pbtxt\n"
+           "\t torq pull memory to copy to ./memory.pbtxt"))
+
+  if args.subcommands == "open" and not does_path_exist(args.file_path):
+    return None, ValidationError(
+        "Command is invalid because %s is an invalid file path."
+        % args.file_path, "Make sure your file exists.")
 
   return args, None
 
@@ -349,6 +368,8 @@ def get_command_type(args):
     command = create_profiler_command(args)
   if args.subcommands == "config":
     command = create_config_command(args)
+  if args.subcommands == "open":
+    command = OpenCommand(args.file_path)
   return command
 
 
