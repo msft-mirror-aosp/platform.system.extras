@@ -921,6 +921,11 @@ class ConfigCommandExecutorUnitTest(unittest.TestCase):
     self.mock_device.get_android_sdk_version.return_value = (
         ANDROID_SDK_VERSION_T)
 
+  @staticmethod
+  def generate_mock_completed_process(stdout_string=b'\n', stderr_string=b'\n'):
+    return mock.create_autospec(subprocess.CompletedProcess, instance=True,
+                                stdout=stdout_string, stderr=stderr_string)
+
   def test_config_list(self):
     terminal_output = io.StringIO()
     sys.stdout = terminal_output
@@ -969,6 +974,40 @@ class ConfigCommandExecutorUnitTest(unittest.TestCase):
     self.assertEqual(error, None)
     self.assertEqual(terminal_output.getvalue(),
                      TEST_DEFAULT_CONFIG_OLD_ANDROID)
+
+  @mock.patch.object(subprocess, "run", autospec=True)
+  def test_config_pull(self, mock_subprocess_run):
+    mock_subprocess_run.return_value = self.generate_mock_completed_process()
+    self.command = ConfigCommand("config pull", "default", None, DEFAULT_DUR_MS,
+                                 None, None)
+
+    error = self.command.execute(self.mock_device)
+
+    self.assertEqual(error, None)
+
+  @mock.patch.object(subprocess, "run", autospec=True)
+  def test_config_pull_no_device_connection(self, mock_subprocess_run):
+    self.mock_device.check_device_connection.return_value = (
+        TEST_VALIDATION_ERROR)
+    mock_subprocess_run.return_value = self.generate_mock_completed_process()
+    self.command = ConfigCommand("config pull", "default", None, DEFAULT_DUR_MS,
+                                 None, None)
+
+    error = self.command.execute(self.mock_device)
+
+    self.assertEqual(error, None)
+
+  @mock.patch.object(subprocess, "run", autospec=True)
+  def test_config_pull_old_android_version(self, mock_subprocess_run):
+    self.mock_device.get_android_sdk_version.return_value = (
+        ANDROID_SDK_VERSION_S)
+    mock_subprocess_run.return_value = self.generate_mock_completed_process()
+    self.command = ConfigCommand("config pull", "default", None, DEFAULT_DUR_MS,
+                                 None, None)
+
+    error = self.command.execute(self.mock_device)
+
+    self.assertEqual(error, None)
 
 
 if __name__ == '__main__':
