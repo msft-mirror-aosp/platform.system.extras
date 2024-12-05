@@ -111,13 +111,10 @@ TEST(cmd_inject, output_option) {
 TEST(cmd_inject, compress_option) {
   TemporaryFile tmpfile;
   close(tmpfile.release());
-  ASSERT_FALSE(RunInjectCmd({"--output", "branch-list", "-z", "-o", tmpfile.path}));
-  std::string tmp_zstd_path = std::string(tmpfile.path) + ".zst";
-  ASSERT_TRUE(RunInjectCmd({"--output", "branch-list", "-z", "-o", tmp_zstd_path}));
+  ASSERT_TRUE(RunInjectCmd({"--output", "branch-list", "-z", "-o", tmpfile.path}));
   std::string autofdo_data;
-  ASSERT_TRUE(RunInjectCmd({"-i", tmp_zstd_path.c_str(), "--output", "autofdo"}, &autofdo_data));
+  ASSERT_TRUE(RunInjectCmd({"-i", tmpfile.path, "--output", "autofdo"}, &autofdo_data));
   CheckMatchingExpectedData("perf_inject.data", autofdo_data);
-  unlink(tmp_zstd_path.c_str());
 }
 
 // @CddTest = 6.1/C-0-2
@@ -339,4 +336,37 @@ TEST(cmd_inject, j_option) {
   ASSERT_FALSE(RunInjectCmd(
       {"-i", std::string(tmpfile.path) + "," + tmpfile.path, "--output", "autofdo", "-j", "0"},
       &autofdo_data));
+}
+
+// @CddTest = 6.1/C-0-2
+TEST(cmd_inject, dump_option) {
+  TemporaryFile tmpfile;
+  close(tmpfile.release());
+  ASSERT_TRUE(RunInjectCmd({"--output", "branch-list", "-o", tmpfile.path}));
+
+  CaptureStdout capture;
+  ASSERT_TRUE(capture.Start());
+  ASSERT_TRUE(InjectCmd()->Run({"--dump", tmpfile.path}));
+  std::string data = capture.Finish();
+  ASSERT_NE(data.find("binary[0].build_id: 0x0c9a20bf9c009d0e4e8bbf9fad0300ae00000000"),
+            std::string::npos);
+
+  ASSERT_TRUE(RunInjectCmd(
+      {"--output", "branch-list", "-o", tmpfile.path, "-i", GetTestData("lbr/perf_lbr.data")}));
+
+  ASSERT_TRUE(capture.Start());
+  ASSERT_TRUE(InjectCmd()->Run({"--dump", tmpfile.path}));
+  data = capture.Finish();
+  ASSERT_NE(data.find("binary[0].path: /home/yabinc/lbr_test_loop"), std::string::npos);
+}
+
+// @CddTest = 6.1/C-0-2
+TEST(cmd_inject, exclude_process_name_option) {
+  TemporaryFile tmpfile;
+  close(tmpfile.release());
+  ASSERT_TRUE(RunInjectCmd(
+      {"--output", "branch-list", "--exclude-process-name", "etm_test_loop", "-o", tmpfile.path}));
+  struct stat st;
+  ASSERT_EQ(stat(tmpfile.path, &st), -1);
+  ASSERT_EQ(errno, ENOENT);
 }
