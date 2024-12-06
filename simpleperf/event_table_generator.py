@@ -278,12 +278,26 @@ def gen_events(event_table_file: str):
         #include <unordered_map>
         #include <unordered_set>
         #include <map>
+        #include <string_view>
 
         #include "event_type.h"
 
         namespace simpleperf {
 
-        std::set<EventType> builtin_event_types = {
+        // A constexpr-constructible version of EventType for the built-in table.
+        struct BuiltinEventType {
+          std::string_view name;
+          uint32_t type;
+          uint64_t config;
+          std::string_view description;
+          std::string_view limited_arch;
+
+          explicit operator EventType() const {
+            return {std::string(name), type, config, std::string(description), std::string(limited_arch)};
+          }
+        };
+
+        static constexpr BuiltinEventType kBuiltinEventTypes[] = {
     """
     generated_str += gen_hardware_events() + '\n'
     generated_str += gen_software_events() + '\n'
@@ -292,6 +306,12 @@ def gen_events(event_table_file: str):
     generated_str += raw_event_generator.generate_raw_events() + '\n'
     generated_str += """
         };
+
+        void LoadBuiltinEventTypes(std::set<EventType>& set) {
+          for (const auto& event_type : kBuiltinEventTypes) {
+            set.insert(static_cast<EventType>(event_type));
+          }
+        }
 
 
     """
