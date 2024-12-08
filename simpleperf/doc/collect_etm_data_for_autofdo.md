@@ -4,16 +4,24 @@
 
 ## Introduction
 
-ETM is a hardware feature available on arm64 devices. It collects the instruction stream running on
-each cpu. ARM uses ETM as an alternative for LBR (last branch record) on x86.
-Simpleperf supports collecting ETM data, and converting it to input files for AutoFDO, which can
-then be used for PGO (profile-guided optimization) during compilation.
+The ARM Embedded Trace Macrocell (ETM) is an instruction tracing unit available on ARM SoCs. ETM
+traces the instruction stream executed on each core and sends the stream to system memory via other
+Coresight components. ETM data contains branch records, similar to Last Branch Records (LBRs) on
+x86 architectures.
 
-On ARMv8, ETM is considered as an external debug interface (unless ARMv8.4 Self-hosted Trace
-extension is impelemented). So it needs to be enabled explicitly in the bootloader, and isn't
-available on user devices. For Pixel devices, it's available on EVT and DVT devices on Pixel 4,
-Pixel 4a (5G) and Pixel 5. To test if it's available on other devices, you can follow commands in
-this doc and see if you can record any ETM data.
+Simpleperf supports collecting ETM data and converting it to input files for AutoFDO, which can
+then be used for Profile-Guided Optimization (PGO) during compilation.
+
+On ARMv8, the ETM and other Coresight components are considered part of the external debug
+interface. Therefore, they are typically only used internally and are disabled on production
+devices. ARMv9 introduces the Embedded Trace Extension (ETE) and Trace Buffer Extension (TRBE)
+to enhance self-hosted ETM data collection. This new hardware is not bound to the external debug
+interface and can be used more widely to collect AutoFDO profiles.
+
+For Pixel devices, ETM data collection is supported on EVT and DVT devices starting with Pixel 4.
+For other devices, you can try the commands in this document to see if ETM data recording is
+possible. To enable ETM data collection on a device, refer to the documentation in
+[Enable ETM data collection](#enable-etm-data-collection).
 
 ## Examples
 
@@ -305,71 +313,240 @@ and power for recording, and can lead to data loss if processing doesn't keep up
 generation rate. For this reason, profcollectd currently uses `-z` for compression instead of
 `--decode-etm`.
 
-## Support ETM in the kernel
+## Enable ETM data collection
 
-To let simpleperf use ETM function, we need to enable Coresight driver in the kernel, which lives in
-`<linux_kernel>/drivers/hwtracing/coresight`.
+To enable ETM data collection on a device, you must first verify that the required hardware is
+present. Then, you need to enable ETM in both the bootloader and the kernel.
 
-The Coresight driver can be enabled by below kernel configs:
+### Check hardware support
 
-```config
-	CONFIG_CORESIGHT=y
-	CONFIG_CORESIGHT_LINK_AND_SINK_TMC=y
-	CONFIG_CORESIGHT_SOURCE_ETM4X=y
+In ARMv8, instruction tracing relies on two Coresight components:
+
+**Coresight ETM**: Generates the ETM data, recording the instruction stream.
+
+**Coresight ETR**: Transfers the ETM data to system memory for analysis.
+
+ARMv9 offers more flexibility with the introduction of new components:
+
+**Embedded Trace Extension (ETE)**: Replaces the Coresight ETM as the instruction trace source.
+
+**Trace Buffer Extension (TRBE)**: Provides an alternative to Coresight ETR for transferring trace
+data to memory. For example:
+
+Pixel 7: Uses Coresight ETM and Coresight ETR (ARMv8).
+
+Pixel 8: Uses ETE and Coresight ETR (ARMv9). While the Pixel 8 has TRBE, known errata with TRBE on
+         its Cortex cores makes it unsuitable for use.
+
+Finding Device Support Information:
+
+**ETE and TRBE support**: Refer to the relevant core's technical reference manual (e.g.,
+                          [Arm® Cortex-X4 Core Technical Reference Manual](https://developer.arm.com/documentation/102484/0002)).
+
+**TRBE errata**: Consult the core's errata notice (e.g.,
+                 [Arm® Cortex-X4 (MP161) Software Developer Errata Notice](https://developer.arm.com/documentation/SDEN-2432808/0800/?lang=en)).
+
+**Coresight ETR support**: Typically detailed in the SoC's manual.
+
+### Enable ETM in the bootloader
+
+To enable Coresight ETM and Coresight ETR on ARMv8 devices (or only Coresight ETR on ARMv9 devices),
+you need to allow non-secure, non-invasive debug access on the CPU. The specific method for doing
+this varies depending on the SoC. After enabling ETM in the bootloader and kernel, you can verify
+that Coresight ETM and ETR are operational by checking their respective `TRCAUTHSTATUS` registers.
+Following is an example of Pixel 6 with ETM enabled:
+
+```sh
+oriole:/ # cat /sys/bus/coresight/devices/etm0/mgmt/trcauthstatus
+0xcc
+oriole:/ # cat /sys/bus/coresight/devices/tmc_etr0/mgmt/authstatus
+0x33
 ```
 
-On Kernel 5.10+, we recommend building Coresight driver as kernel modules. Because it works with
-GKI kernel.
+To enable ETE on ARMv9 devices, you need to allow the kernel to access trace system registers. This
+is done by setting the `ENABLE_SYS_REG_TRACE_FOR_NS` build option in Trusted Firmware-A (see
+[documentation](https://trustedfirmware-a.readthedocs.io/en/v2.11/getting_started/build-options.html)).
 
+To enable TRBE on ARMv9 devices, you need to allow the kernel to access trace buffer control
+registers. This is done by setting the `ENABLE_TRBE_FOR_NS` build option in Trusted Firmware-A (see
+[documentation](https://trustedfirmware-a.readthedocs.io/en/v2.11/getting_started/build-options.html)).
+
+
+### Enable ETM in the kernel
+
+Android kernels from version 6.x onwards generally include the necessary patches for ETM data
+collection. To enable ETM in the kernel, you need to build the required kernel modules and add the
+appropriate device tree entries.
+
+Enable the following kernel configuration options to include the ETM kernel modules:
 ```config
 	CONFIG_CORESIGHT=m
 	CONFIG_CORESIGHT_LINK_AND_SINK_TMC=m
 	CONFIG_CORESIGHT_SOURCE_ETM4X=m
+	CONFIG_CORESIGHT_TRBE=m
 ```
 
-Android common kernel 5.10+ should have all the Coresight patches needed to collect ETM data.
-Android common kernel 5.4 misses two patches. But by adding patches in
-https://android-review.googlesource.com/q/topic:test_etm_on_hikey960_5.4, we can collect ETM data
-on hikey960 with 5.4 kernel.
-For Android common kernel 4.14 and 4.19, we have backported all necessary Coresight patches.
+These options will build the following kernel modules:
+```
+coresight.ko
+coresight-etm4x.ko
+coresight-funnel.ko
+coresight-replicator.ko
+coresight-tmc.ko
+coresight-trbe.ko
+```
 
-Besides Coresight driver, we also need to add Coresight devices in device tree. An example is in
-https://github.com/torvalds/linux/blob/master/arch/arm64/boot/dts/arm/juno-base.dtsi. There should
-be a path flowing ETM data from ETM device through funnels, ETF and replicators, all the way to
-ETR, which writes ETM data to system memory.
+Different SoCs have varying Coresight device connections, address assignments, and interrupt
+configurations. Therefore, providing a universal device tree example is not feasible. However, the
+following examples from Pixel devices illustrate how device tree entries for ETM components might
+look.
 
-One optional flag in ETM device tree is "arm,coresight-loses-context-with-cpu". It saves ETM
-registers when a CPU enters low power state. It may be needed to avoid
-"coresight_disclaim_device_unlocked" warning when doing system wide collection.
+**Example 1: Coresight ETM and Coresight ETR (Pixel 6)**
 
-One optional flag in ETR device tree is "arm,scatter-gather". Simpleperf requests 4M system memory
-for ETR to store ETM data. Without IOMMU, the memory needs to be contiguous. If the kernel can't
-fulfill the request, simpleperf will report out of memory error. Fortunately, we can use
-"arm,scatter-gather" flag to let ETR run in scatter gather mode, which uses non-contiguous memory.
+This example shows the device tree entries for Coresight ETM and ETR on Pixel 6
+(source: [gs101-debug.dtsi](https://android.googlesource.com/kernel/devices/google/gs101/+/refs/heads/android-gs-tangorpro-6.1-android16-dp/dts/gs101-debug.dtsi#287)).
+
+```device-tree
+etm0: etm@25840000 {
+    compatible = "arm,primecell";
+    arm,primecell-periphid = <0x000bb95d>;
+    reg = <0 0x25840000 0x1000>;
+    cpu = <&cpu0>;
+    coresight-name = "coresight-etm0";
+    clocks = <&clock ATCLK>;
+    clock-names = "apb_pclk";
+    arm,coresight-loses-context-with-cpu;
+    out-ports {
+        port {
+            etm0_out_port: endpoint {
+                remote-endpoint = <&funnel0_in_port0>;
+            };
+        };
+    };
+};
+
+// ... etm1 to etm7, funnel0 to funnel2, etf0, etf1 ...
+
+etr: etr@2500a000 {
+    compatible = "arm,coresight-tmc", "arm,primecell";
+    arm,primecell-periphid = <0x001bb961>;
+    reg = <0 0x2500a000 0x1000>;
+    coresight-name = "coresight-etr";
+    arm,scatter-gather;
+    clocks = <&clock ATCLK>;
+    clock-names = "apb_pclk";
+    in-ports {
+        port {
+            etr_in_port: endpoint {
+                remote-endpoint = <&funnel2_out_port>;
+            };
+        };
+    };
+};
+
+**Example 2: ETE and Coresight ETR (Pixel 8)**
+
+This example shows the device tree entries for ETE and Coresight ETR on Pixel 8
+(source: [zuma-debug.dtsi](https://android.googlesource.com/kernel/devices/google/zuma/+/refs/heads/android-gs-shusky-6.1-android16-dp/dts/zuma-debug.dtsi#428)).
+
+```device-tree
+ete0 {
+    compatible = "arm,embedded-trace-extension";
+    cpu = <&cpu0>;
+    arm,coresight-loses-context-with-cpu;
+    out-ports {
+        port {
+            ete0_out_port: endpoint {
+                remote-endpoint = <&funnel0_in_port0>;
+            };
+        };
+    };
+};
+
+// ... ete1 to ete8, funnel0 to funnel2, etf0 ...
+
+etr: etr@2a00a000 {
+    compatible = "arm,coresight-tmc", "arm,primecell";
+    arm,primecell-periphid = <0x001bb961>;
+    reg = <0 0x2a00a000 0x1000>;
+    coresight-name = "coresight-etr";
+    arm,scatter-gather;
+    clocks = <&clock ATCLK>;
+    clock-names = "apb_pclk";
+    in-ports {
+        port {
+            etr_in_port: endpoint {
+                remote-endpoint = <&funnel2_out_port>;
+            };
+        };
+    };
+};
+```
+
+**Example 3: TRBE
+
+This example shows a basic device tree entry for TRBE.
+
+```device-tree
+trbe {
+    compatible = "arm,trace-buffer-extension";
+    interrupts = <GIC_PPI 0 IRQ_TYPE_LEVEL_HIGH 0>;
+};
+```
+
+One optional flag in the ETM/ETE device tree is `arm,coresight-loses-context-with-cpu`. This flag
+ensures that ETM registers are saved when a CPU enters a low-power state. It is necessary if the
+CPU powers down the ETM/ETE during low-power states. Without this flag, the kernel cannot properly
+resume ETM data collection after the CPU wakes up, and you will likely see a
+`coresight_disclaim_device_unlocked` warning during system-wide data collection.
+
+Another optional flag in the ETR device tree is `arm,scatter-gather`. Simpleperf requires 4MB of
+contiguous system memory for the ETR to store ETM data (unless an IOMMU is present). If the kernel
+cannot provide this contiguous memory, simpleperf will report an out-of-memory error.  Using the
+`arm,scatter-gather` flag allows the ETR to operate in scatter-gather mode, enabling it to utilize
+non-contiguous memory.
+
+Each CPU has an ETM device with a unique trace_id assigned by the kernel. The standard formula for
+determining the trace_id is: `trace_id = 0x10 + cpu * 2` (as defined in
+[coresight-pmu.h](https://github.com/torvalds/linux/blob/master/include/linux/coresight-pmu.h#L22)).
+If your kernel uses a different formula due to local patches, the simpleperf inject command may
+fail to parse the ETM data correctly, potentially resulting in empty output.
 
 
-### A possible problem: trace_id mismatch
+### Check ETM enable status in /sys
 
-Each CPU has an ETM device, which has a unique trace_id assigned from the kernel.
-The formula is: `trace_id = 0x10 + cpu * 2`, as in https://github.com/torvalds/linux/blob/master/include/linux/coresight-pmu.h#L37.
-If the formula is modified by local patches, then simpleperf inject command can't parse ETM data
-properly and is likely to give empty output.
+The status of ETM devices is reflected in /sys. The following is an example from a Pixel 9.
 
+```sh
+# List available Coresight devices, including ETE and TRBE.
+comet:/sys/bus/coresight/devices $ ls
+ete0  ete1  ete2  ete3  ete4  ete5  ete6  ete7  funnel0  funnel1  funnel2  tmc_etf0  tmc_etr0
 
-## Enable ETM in the bootloader
+# Check if Coresight ETR is enabled.
+comet:/sys/bus/coresight/devices $ cat tmc_etr0/mgmt/authstatus
+0x33
 
-Unless ARMv8.4 Self-hosted Trace extension is implemented, ETM is considered as an external debug
-interface. It may be disabled by fuse (like JTAG). So we need to check if ETM is disabled, and
-if bootloader provides a way to reenable it.
+# Check if we have Coresight ETM/ETE devices as perf event sources.
+comet:/sys/bus/event_source/devices/cs_etm $ ls -l
+total 0
+lrwxrwxrwx 1 root root    0 2024-12-03 17:37 cpu0 -> ../platform/ete0/ete0
+lrwxrwxrwx 1 root root    0 2024-12-03 17:37 cpu1 -> ../platform/ete1/ete1
+lrwxrwxrwx 1 root root    0 2024-12-03 17:37 cpu2 -> ../platform/ete2/ete2
+lrwxrwxrwx 1 root root    0 2024-12-03 17:37 cpu3 -> ../platform/ete3/ete3
+lrwxrwxrwx 1 root root    0 2024-12-03 17:37 cpu4 -> ../platform/ete4/ete4
+lrwxrwxrwx 1 root root    0 2024-12-03 17:37 cpu5 -> ../platform/ete5/ete5
+lrwxrwxrwx 1 root root    0 2024-12-03 17:37 cpu6 -> ../platform/ete6/ete6
+lrwxrwxrwx 1 root root    0 2024-12-03 17:37 cpu7 -> ../platform/ete7/ete7
 
-We can tell if ETM is disable by checking its TRCAUTHSTATUS register, which is exposed in sysfs,
-like /sys/bus/coresight/devices/coresight-etm0/mgmt/trcauthstatus. To reenable ETM, we need to
-enable non-Secure non-invasive debug on ARM CPU. The method depends on chip vendors(SOCs).
+# Check if we have Coresight ETR/TRBE to move ETM data to system memory.
+comet:/sys/bus/event_source/devices/cs_etm/sinks $ ls
+tmc_etf0  tmc_etr0
+```
 
 
 ## Related docs
 
-* [Arm Architecture Reference Manual Armv8, D3 AArch64 Self-hosted Trace](https://developer.arm.com/documentation/ddi0487/latest)
+* [Arm Architecture Reference Manual for A-profile architecture, D3-D6](https://developer.arm.com/documentation/ddi0487/latest/)
 * [ARM ETM Architecture Specification](https://developer.arm.com/documentation/ihi0064/latest/)
 * [ARM CoreSight Architecture Specification](https://developer.arm.com/documentation/ihi0029/latest)
 * [CoreSight Components Technical Reference Manual](https://developer.arm.com/documentation/ddi0314/h/)
