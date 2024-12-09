@@ -225,6 +225,7 @@ class BranchListProtoReader {
   bool ReadProtoBranchList(uint32_t size, proto::BranchList& proto_branch_list);
   bool AddETMBinary(const proto::ETMBinary& proto_binary, ETMBinaryMap& etm_data);
   void AddLBRData(const proto::LBRData& proto_lbr_data, LBRData& lbr_data);
+  void Rewind();
   bool ReadData(void* data, size_t size);
   bool ReadOldFileFormat(ETMBinaryMap& etm_data, LBRData& lbr_data);
 

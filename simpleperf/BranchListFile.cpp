@@ -615,6 +615,14 @@ bool BranchListProtoReader::ReadProtoBranchList(uint32_t size,
   return true;
 }
 
+void BranchListProtoReader::Rewind() {
+  if (input_fp_) {
+    rewind(input_fp_.get());
+  } else {
+    input_str_pos_ = 0;
+  }
+}
+
 bool BranchListProtoReader::ReadData(void* data, size_t size) {
   if (input_fp_) {
     if (fread(data, size, 1, input_fp_.get()) != 1) {
@@ -642,6 +650,7 @@ bool BranchListProtoReader::ReadOldFileFormat(ETMBinaryMap& etm_data, LBRData& l
   } else {
     size = input_str_.size();
   }
+  Rewind();
   proto::BranchList proto_branch_list;
   if (!ReadProtoBranchList(size, proto_branch_list)) {
     return false;
