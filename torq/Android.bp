@@ -29,6 +29,7 @@ python_defaults {
         "open_ui.py",
         "utils.py",
         "validate_simpleperf.py",
+        "handle_input.py",
     ],
 }
 
@@ -106,6 +107,22 @@ python_test_host {
     name: "validate_simpleperf_unit_test",
     main: "tests/validate_simpleperf_unit_test.py",
     srcs: ["tests/validate_simpleperf_unit_test.py"],
+    defaults: ["torq_defaults"],
+    version: {
+        py3: {
+            enabled: true,
+            embedded_launcher: false,
+        },
+    },
+    test_options: {
+        unit_test: true,
+    },
+}
+
+python_test_host {
+    name: "utils_unit_test",
+    main: "tests/utils_unit_test.py",
+    srcs: ["tests/utils_unit_test.py"],
     defaults: ["torq_defaults"],
     version: {
         py3: {
