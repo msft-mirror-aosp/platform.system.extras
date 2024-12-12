@@ -17,6 +17,7 @@
 #include <gtest/gtest.h>
 
 #include "BranchListFile.h"
+#include "get_test_data.h"
 
 using namespace simpleperf;
 
@@ -148,4 +149,15 @@ TEST(BranchListProtoReaderWriter, smoke) {
       ASSERT_TRUE(IsLBRDataEqual(lbr_data, new_lbr_data));
     }
   }
+}
+
+// @CddTest = 6.1/C-0-2
+TEST(BranchListProtoReaderWriter, read_old_branch_list_file) {
+  std::string path = GetTestData("etm/old_branch_list.data");
+  auto reader = BranchListProtoReader::CreateForFile(path);
+  ASSERT_TRUE(reader);
+  ETMBinaryMap etm_data;
+  LBRData lbr_data;
+  ASSERT_TRUE(reader->Read(etm_data, lbr_data));
+  ASSERT_EQ(etm_data.size(), 1u);
 }
