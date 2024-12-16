@@ -49,14 +49,12 @@ impl IProviderStatusCallback for ProviderStatusCallback {
         if elapsed < TIMEOUT_TO_COLLECT_BOOT_PROFILE {
             trace_system("boot").map_err(err_to_binder_status)?;
         }
-        schedule().map_err(err_to_binder_status)?;
         Ok(())
     }
 }
 
-/// Initialise profcollectd service.
-/// * `schedule_now` - Immediately schedule collection after service is initialised.
-pub fn init_service(schedule_now: bool) -> Result<()> {
+/// Initialize profcollectd service.
+pub fn init_service() -> Result<()> {
     binder::ProcessState::start_thread_pool();
 
     let profcollect_binder_service = ProfcollectdBinderService::new()?;
@@ -67,13 +65,11 @@ pub fn init_service(schedule_now: bool) -> Result<()> {
     )
     .context("Failed to register service.")?;
 
-    if schedule_now {
-        let cb = BnProviderStatusCallback::new_binder(
-            ProviderStatusCallback { service_start_time: Instant::now() },
-            BinderFeatures::default(),
-        );
-        get_profcollectd_service()?.registerProviderStatusCallback(&cb)?;
-    }
+    let cb = BnProviderStatusCallback::new_binder(
+        ProviderStatusCallback { service_start_time: Instant::now() },
+        BinderFeatures::default(),
+    );
+    get_profcollectd_service()?.registerProviderStatusCallback(&cb)?;
 
     binder::ProcessState::join_thread_pool();
     Ok(())
@@ -82,18 +78,6 @@ pub fn init_service(schedule_now: bool) -> Result<()> {
 fn get_profcollectd_service() -> Result<binder::Strong<dyn IProfCollectd::IProfCollectd>> {
     binder::wait_for_interface(PROFCOLLECTD_SERVICE_NAME)
         .context("Failed to get profcollectd binder service, is profcollectd running?")
-}
-
-/// Schedule periodic profile collection.
-pub fn schedule() -> Result<()> {
-    get_profcollectd_service()?.schedule()?;
-    Ok(())
-}
-
-/// Terminate periodic profile collection.
-pub fn terminate() -> Result<()> {
-    get_profcollectd_service()?.terminate()?;
-    Ok(())
 }
 
 /// Immediately schedule a one-off trace.
