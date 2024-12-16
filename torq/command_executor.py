@@ -21,11 +21,13 @@ from abc import ABC, abstractmethod
 from config_builder import PREDEFINED_PERFETTO_CONFIGS, build_custom_config
 from open_ui import open_trace
 from device import SIMPLEPERF_TRACE_FILE
+from utils import convert_simpleperf_to_gecko
 
 PERFETTO_TRACE_FILE = "/data/misc/perfetto-traces/trace.perfetto-trace"
 PERFETTO_BOOT_TRACE_FILE = "/data/misc/perfetto-traces/boottrace.perfetto-trace"
 WEB_UI_ADDRESS = "https://ui.perfetto.dev"
 TRACE_START_DELAY_SECS = 0.5
+MAX_WAIT_FOR_INIT_USER_SWITCH_SECS = 180
 ANDROID_SDK_VERSION_T = 33
 
 
@@ -61,19 +63,22 @@ class ProfilerCommandExecutor(CommandExecutor):
     if error is not None:
       return error
     host_file = None
+    host_gecko_file = None
     for run in range(1, command.runs + 1):
       timestamp = datetime.datetime.now().strftime("%Y-%m-%d-%H-%M-%S")
       if command.profiler == "perfetto":
         host_file = f"{command.out_dir}/trace-{timestamp}.perfetto-trace"
       else:
         host_file = f"{command.out_dir}/perf-{timestamp}.data"
+        host_gecko_file = f"{command.out_dir}/perf-{timestamp}.json"
       error = self.prepare_device_for_run(command, device)
       if error is not None:
         return error
       error = self.execute_run(command, device, config, run)
       if error is not None:
         return error
-      error = self.retrieve_perf_data(command, device, host_file)
+      error = self.retrieve_perf_data(command, device, host_file,
+                                      host_gecko_file)
       if error is not None:
         return error
       if command.runs != run:
@@ -82,7 +87,10 @@ class ProfilerCommandExecutor(CommandExecutor):
     if error is not None:
       return error
     if command.use_ui:
-      open_trace(host_file, WEB_UI_ADDRESS)
+      if command.profiler == "perfetto":
+        open_trace(host_file, WEB_UI_ADDRESS)
+      else:
+        open_trace(host_gecko_file, WEB_UI_ADDRESS)
     return None
 
   @staticmethod
@@ -118,11 +126,13 @@ class ProfilerCommandExecutor(CommandExecutor):
   def trigger_system_event(self, command, device):
     return None
 
-  def retrieve_perf_data(self, command, device, host_file):
+  def retrieve_perf_data(self, command, device, host_file, host_gecko_file):
     if command.profiler == "perfetto":
       device.pull_file(PERFETTO_TRACE_FILE, host_file)
     else:
       device.pull_file(SIMPLEPERF_TRACE_FILE, host_file)
+      convert_simpleperf_to_gecko(command.scripts_path, host_file,
+                                  host_gecko_file, command.symbols)
 
   def cleanup(self, command, device):
     return None
@@ -134,12 +144,17 @@ class UserSwitchCommandExecutor(ProfilerCommandExecutor):
     super().prepare_device_for_run(command, device)
     current_user = device.get_current_user()
     if command.from_user != current_user:
-      dur_seconds = command.dur_ms / 1000
+      dur_seconds = min(command.dur_ms / 1000,
+                        MAX_WAIT_FOR_INIT_USER_SWITCH_SECS)
       print("Switching from the current user, %s, to the from-user, %s. Waiting"
             " for %s seconds."
             % (current_user, command.from_user, dur_seconds))
       device.perform_user_switch(command.from_user)
       time.sleep(dur_seconds)
+      if device.get_current_user() != command.from_user:
+        raise Exception(("Device with serial %s took more than %d secs to "
+                         "switch to the initial user."
+                         % (device.serial, dur_seconds)))
 
   def trigger_system_event(self, command, device):
     print("Switching from the from-user, %s, to the to-user, %s."
@@ -175,7 +190,7 @@ class BootCommandExecutor(ProfilerCommandExecutor):
   def trigger_system_event(self, command, device):
     device.reboot()
 
-  def retrieve_perf_data(self, command, device, host_file):
+  def retrieve_perf_data(self, command, device, host_file, host_gecko_file):
     device.pull_file(PERFETTO_BOOT_TRACE_FILE, host_file)
 
 

@@ -16,10 +16,12 @@
 
 import argparse
 import os
-from command import ProfilerCommand, ConfigCommand
+from command import ProfilerCommand, ConfigCommand, OpenCommand
 from device import AdbDevice
 from validation_error import ValidationError
 from config_builder import PREDEFINED_PERFETTO_CONFIGS
+from utils import path_exists
+from validate_simpleperf import verify_simpleperf_args
 
 DEFAULT_DUR_MS = 10000
 MIN_DURATION_MS = 3000
@@ -71,6 +73,8 @@ def create_parser():
   parser.add_argument('--serial',
                       help=(('Specifies serial of the device that will be'
                              ' used.')))
+  parser.add_argument('--symbols',
+                      help='Specifies path to symbols library.')
   subparsers = parser.add_subparsers(dest='subcommands', help='Subcommands')
   config_parser = subparsers.add_parser('config',
                                         help=('The config subcommand used'
@@ -102,6 +106,11 @@ def create_parser():
   config_pull_parser.add_argument('file_path', nargs='?',
                                   help=('File path to copy the predefined'
                                         ' config to'))
+  open_parser = subparsers.add_parser('open',
+                                      help=('The open subcommand is used '
+                                            'to open trace files in the '
+                                            'perfetto ui.'))
+  open_parser.add_argument('file_path', help='Path to trace file.')
   return parser
 
 
@@ -318,6 +327,18 @@ def verify_args(args):
            "\t torq pull lightweight to copy to ./lightweight.pbtxt\n"
            "\t torq pull memory to copy to ./memory.pbtxt"))
 
+  if args.subcommands == "open" and not path_exists(args.file_path):
+    return None, ValidationError(
+        "Command is invalid because %s is an invalid file path."
+        % args.file_path, "Make sure your file exists.")
+
+  if args.profiler == "simpleperf":
+    args, error = verify_simpleperf_args(args)
+    if error is not None:
+      return None, error
+  else:
+    args.scripts_path = None
+
   return args, None
 
 
@@ -328,7 +349,7 @@ def create_profiler_command(args):
                          args.perfetto_config, args.between_dur_ms,
                          args.ui, args.excluded_ftrace_events,
                          args.included_ftrace_events, args.from_user,
-                         args.to_user)
+                         args.to_user, args.scripts_path, args.symbols)
 
 
 def create_config_command(args):
@@ -357,6 +378,8 @@ def get_command_type(args):
     command = create_profiler_command(args)
   if args.subcommands == "config":
     command = create_config_command(args)
+  if args.subcommands == "open":
+    command = OpenCommand(args.file_path)
   return command
 
 

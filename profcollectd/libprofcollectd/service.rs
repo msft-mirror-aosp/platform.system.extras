@@ -51,20 +51,6 @@ struct Lock {
 impl binder::Interface for ProfcollectdBinderService {}
 
 impl IProfCollectd for ProfcollectdBinderService {
-    fn schedule(&self) -> BinderResult<()> {
-        let lock = &mut *self.lock();
-        lock.scheduler
-            .schedule_periodic(&lock.config)
-            .context("Failed to schedule collection.")
-            .map_err(err_to_binder_status)
-    }
-    fn terminate(&self) -> BinderResult<()> {
-        self.lock()
-            .scheduler
-            .terminate_periodic()
-            .context("Failed to terminate collection.")
-            .map_err(err_to_binder_status)
-    }
     fn trace_system(&self, tag: &str) -> BinderResult<()> {
         let lock = &mut *self.lock();
         lock.scheduler
