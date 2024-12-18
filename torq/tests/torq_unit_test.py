@@ -21,6 +21,11 @@ from unittest import mock
 from torq import create_parser, verify_args, get_command_type,\
   DEFAULT_DUR_MS, DEFAULT_OUT_DIR
 
+TEST_USER_ID = 10
+TEST_PACKAGE = "com.android.contacts"
+TEST_FILE = "file.pbtxt"
+SYMBOLS_PATH = "/folder/symbols"
+
 
 class TorqUnitTest(unittest.TestCase):
 
@@ -62,7 +67,8 @@ class TorqUnitTest(unittest.TestCase):
     self.assertEqual(error, None)
     self.assertEqual(args.event, "boot")
 
-    parser = self.set_up_parser("torq.py -e user-switch")
+    parser = self.set_up_parser(
+        "torq.py -e user-switch --to-user %s" % str(TEST_USER_ID))
 
     args = parser.parse_args()
     args, error = verify_args(args)
@@ -70,7 +76,8 @@ class TorqUnitTest(unittest.TestCase):
     self.assertEqual(error, None)
     self.assertEqual(args.event, "user-switch")
 
-    parser = self.set_up_parser("torq.py -e app-startup")
+    parser = self.set_up_parser(
+        "torq.py -e app-startup --app %s" % TEST_PACKAGE)
 
     args = parser.parse_args()
     args, error = verify_args(args)
@@ -84,7 +91,11 @@ class TorqUnitTest(unittest.TestCase):
     with self.assertRaises(SystemExit):
       parser.parse_args()
 
-  def test_create_parser_valid_profiler_names(self):
+  @mock.patch.object(os.path, "exists", autospec=True)
+  @mock.patch.object(os.path, "isdir", autospec=True)
+  def test_create_parser_valid_profiler_names(self, mock_isdir, mock_exists):
+    mock_isdir.return_value = True
+    mock_exists.return_value = True
     parser = self.set_up_parser("torq.py -p perfetto")
 
     args = parser.parse_args()
@@ -93,7 +104,8 @@ class TorqUnitTest(unittest.TestCase):
     self.assertEqual(error, None)
     self.assertEqual(args.profiler, "perfetto")
 
-    parser = self.set_up_parser("torq.py -p simpleperf")
+    parser = self.set_up_parser("torq.py -p simpleperf --symbols %s"
+                                % SYMBOLS_PATH)
 
     args = parser.parse_args()
     args, error = verify_args(args)
@@ -157,7 +169,27 @@ class TorqUnitTest(unittest.TestCase):
     self.assertEqual(error, None)
     self.assertEqual(args.dur_ms, 100000)
 
-  def test_verify_args_ui_bool_true_and_runs_dependencies(self):
+  def test_verify_args_ui_and_runs_valid_dependency(self):
+    parser = self.set_up_parser("torq.py -r 2 --no-ui")
+
+    args = parser.parse_args()
+    args, error = verify_args(args)
+
+    self.assertEqual(error, None)
+
+  def test_verify_args_ui_and_runs_invalid_dependency(self):
+    parser = self.set_up_parser("torq.py -r 2 --ui")
+
+    args = parser.parse_args()
+    args, error = verify_args(args)
+
+    self.assertEqual(error.message, ("Command is invalid because --ui cannot be"
+                                     " passed if --runs is set to a value"
+                                     " greater than 1."))
+    self.assertEqual(error.suggestion, ("Set torq -r 2 --no-ui to perform 2"
+                                        " runs."))
+
+  def test_verify_args_ui_bool_true_and_runs_default_dependencies(self):
     parser = self.set_up_parser("torq.py")
 
     args = parser.parse_args()
@@ -175,7 +207,7 @@ class TorqUnitTest(unittest.TestCase):
     self.assertEqual(args.ui, True)
 
   # UI is false by default when multiple runs are specified.
-  def test_verify_args_ui_bool_false_and_runs_dependencies(self):
+  def test_verify_args_ui_bool_false_and_runs_default_dependency(self):
     parser = self.set_up_parser("torq.py -r 2")
 
     args = parser.parse_args()
@@ -367,17 +399,84 @@ class TorqUnitTest(unittest.TestCase):
                                         "\t torq --perfetto-config"
                                         " <config-filepath>"))
 
-  # TODO: Make sure that package name is correct once feature is implemented.
-  def test_verify_args_app_and_event_valid_dependency(self):
-    parser = self.set_up_parser("torq.py -e app-startup -a google")
+  def test_verify_args_from_user_and_event_valid_dependency(self):
+    parser = self.set_up_parser(("torq.py -e user-switch --from-user 0"
+                                 " --to-user %s") % str(TEST_USER_ID))
 
     args = parser.parse_args()
     args, error = verify_args(args)
 
     self.assertEqual(error, None)
 
-  def test_verify_args_app_and_event_invalid_dependency(self):
-    parser = self.set_up_parser("torq.py -a google")
+  def test_verify_args_from_user_and_event_invalid_dependency(self):
+    parser = self.set_up_parser("torq.py --from-user %s" % str(TEST_USER_ID))
+
+    args = parser.parse_args()
+    args, error = verify_args(args)
+
+    self.assertEqual(error.message, ("Command is invalid because --from-user"
+                                     " is passed, but --event is not set to"
+                                     " user-switch."))
+    self.assertEqual(error.suggestion, ("Set --event user-switch --from-user %s"
+                                        " to perform a user-switch from user"
+                                        " %s." % (str(TEST_USER_ID),
+                                                  str(TEST_USER_ID))))
+
+  def test_verify_args_to_user_and_event_valid_dependency(self):
+    parser = self.set_up_parser(
+        "torq.py -e user-switch --to-user %s" % str(TEST_USER_ID))
+
+    args = parser.parse_args()
+    args, error = verify_args(args)
+
+    self.assertEqual(error, None)
+
+  def test_verify_args_to_user_not_passed_and_event_invalid_dependency(self):
+    parser = self.set_up_parser("torq.py -e user-switch")
+
+    args = parser.parse_args()
+    args, error = verify_args(args)
+
+    self.assertEqual(error.message, ("Command is invalid because --to-user is"
+                                     " not passed."))
+    self.assertEqual(error.suggestion, ("Set --event user-switch --to-user"
+                                        " <user-id> to perform a user-switch."))
+
+  def test_verify_args_to_user_and_user_switch_not_set_invalid_dependency(self):
+    parser = self.set_up_parser("torq.py --to-user %s" % str(TEST_USER_ID))
+
+    args = parser.parse_args()
+    args, error = verify_args(args)
+
+    self.assertEqual(error.message, ("Command is invalid because --to-user"
+                                     " is passed, but --event is not set to"
+                                     " user-switch."))
+    self.assertEqual(error.suggestion, ("Set --event user-switch --to-user %s"
+                                        " to perform a user-switch to user"
+                                        " %s." % (str(TEST_USER_ID),
+                                                  str(TEST_USER_ID))))
+
+  def test_verify_args_app_and_event_valid_dependency(self):
+    parser = self.set_up_parser("torq.py -e app-startup -a %s" % TEST_PACKAGE)
+
+    args = parser.parse_args()
+    args, error = verify_args(args)
+
+    self.assertEqual(error, None)
+
+  def test_verify_args_app_not_passed_and_event_invalid_dependency(self):
+    parser = self.set_up_parser("torq.py -e app-startup")
+
+    args = parser.parse_args()
+    args, error = verify_args(args)
+
+    self.assertEqual(error.message,
+                     "Command is invalid because --app is not passed.")
+    self.assertEqual(error.suggestion, ("Set --event app-startup --app "
+                                        "<package> to perform an app-startup."))
+
+  def test_verify_args_app_and_app_startup_not_set_invalid_dependency(self):
+    parser = self.set_up_parser("torq.py -a %s" % TEST_PACKAGE)
 
     args = parser.parse_args()
     args, error = verify_args(args)
@@ -389,8 +488,14 @@ class TorqUnitTest(unittest.TestCase):
                                         " torq --event app-startup --app"
                                         " <package-name>"))
 
-  def test_verify_args_profiler_and_simpleperf_event_valid_dependencies(self):
-    parser = self.set_up_parser("torq.py -p simpleperf")
+  @mock.patch.object(os.path, "exists", autospec=True)
+  @mock.patch.object(os.path, "isdir", autospec=True)
+  def test_verify_args_profiler_and_simpleperf_event_valid_dependencies(self,
+      mock_isdir, mock_exists):
+    mock_isdir.return_value = True
+    mock_exists.return_value = True
+    parser = self.set_up_parser("torq.py -p simpleperf --symbols %s"
+                                % SYMBOLS_PATH)
 
     args = parser.parse_args()
     args, error = verify_args(args)
@@ -399,7 +504,8 @@ class TorqUnitTest(unittest.TestCase):
     self.assertEqual(len(args.simpleperf_event), 1)
     self.assertEqual(args.simpleperf_event[0], "cpu-cycles")
 
-    parser = self.set_up_parser("torq.py -p simpleperf -s cpu-cycles")
+    parser = self.set_up_parser("torq.py -p simpleperf -s cpu-cycles "
+                                "--symbols %s" % SYMBOLS_PATH)
 
     args = parser.parse_args()
     args, error = verify_args(args)
@@ -614,9 +720,15 @@ class TorqUnitTest(unittest.TestCase):
                                         " include power/cpu_idle in the"
                                         " config."))
 
-  def test_verify_args_multiple_valid_simpleperf_events(self):
+  @mock.patch.object(os.path, "exists", autospec=True)
+  @mock.patch.object(os.path, "isdir", autospec=True)
+  def test_verify_args_multiple_valid_simpleperf_events(self, mock_isdir,
+      mock_exists):
+    mock_isdir.return_value = True
+    mock_exists.return_value = True
     parser = self.set_up_parser(("torq.py -p simpleperf -s cpu-cycles"
-                                 " -s instructions"))
+                                 " -s instructions --symbols %s"
+                                 % SYMBOLS_PATH))
 
     args = parser.parse_args()
     args, error = verify_args(args)
@@ -644,24 +756,6 @@ class TorqUnitTest(unittest.TestCase):
     with self.assertRaises(SystemExit):
       parser.parse_args()
 
-  def test_verify_args_invalid_mixing_of_profiler_and_hw_subcommand(self):
-    parser = self.set_up_parser("torq.py -d 20000 hw set seahawk")
-
-    args = parser.parse_args()
-    args, error = verify_args(args)
-
-    self.assertEqual(error.message, ("Command is invalid because profiler"
-                                     " command is followed by a hw or"
-                                     " config command."))
-    self.assertEqual(error.suggestion, ("Remove the 'hw' or 'config' subcommand"
-                                        " to profile the device instead."))
-
-  def test_create_parser_invalid_mixing_of_profiler_and_hw_subcommand(self):
-    parser = self.set_up_parser("torq.py hw set seahawk -d 20000 ")
-
-    with self.assertRaises(SystemExit):
-      parser.parse_args()
-
   def test_verify_args_invalid_mixing_of_profiler_and_config_subcommand(self):
     parser = self.set_up_parser("torq.py -d 20000 config pull lightweight")
 
@@ -669,10 +763,10 @@ class TorqUnitTest(unittest.TestCase):
     args, error = verify_args(args)
 
     self.assertEqual(error.message, ("Command is invalid because profiler"
-                                     " command is followed by a hw or"
-                                     " config command."))
-    self.assertEqual(error.suggestion, ("Remove the 'hw' or 'config' subcommand"
-                                        " to profile the device instead."))
+                                     " command is followed by a config"
+                                     " command."))
+    self.assertEqual(error.suggestion, ("Remove the 'config' subcommand to"
+                                        " profile the device instead."))
 
   def test_create_parser_invalid_mixing_of_profiler_and_config_subcommand(self):
     parser = self.set_up_parser("torq.py config pull lightweight -d 20000")
@@ -690,7 +784,7 @@ class TorqUnitTest(unittest.TestCase):
     self.assertEqual(error, None)
     self.assertEqual(command.get_type(), "profiler")
 
-  def test_create_parser_valid_hw_config_show_values(self):
+  def test_create_parser_valid_config_show_values(self):
     parser = self.set_up_parser("torq.py config show default")
 
     args = parser.parse_args()
@@ -715,13 +809,13 @@ class TorqUnitTest(unittest.TestCase):
     self.assertEqual(error, None)
     self.assertEqual(args.config_name, "memory")
 
-  def test_create_parser_invalid_hw_config_show_values(self):
+  def test_create_parser_invalid_config_show_values(self):
     parser = self.set_up_parser("torq.py config show fake-config")
 
     with self.assertRaises(SystemExit):
       parser.parse_args()
 
-  def test_create_parser_valid_hw_config_pull_values(self):
+  def test_create_parser_valid_config_pull_values(self):
     parser = self.set_up_parser("torq.py config pull default")
 
     args = parser.parse_args()
@@ -746,200 +840,11 @@ class TorqUnitTest(unittest.TestCase):
     self.assertEqual(error, None)
     self.assertEqual(args.config_name, "memory")
 
-  def test_create_parser_invalid_hw_config_pull_values(self):
+  def test_create_parser_invalid_config_pull_values(self):
     parser = self.set_up_parser("torq.py config pull fake-config")
 
     with self.assertRaises(SystemExit):
       parser.parse_args()
-
-  def test_verify_args_valid_hw_num_cpus_and_memory_values(self):
-    parser = self.set_up_parser("torq.py hw set -n 2")
-
-    args = parser.parse_args()
-    args, error = verify_args(args)
-
-    self.assertEqual(error, None)
-    self.assertEqual(args.num_cpus, 2)
-
-    parser = self.set_up_parser("torq.py hw set -m 4G")
-
-    args = parser.parse_args()
-    args, error = verify_args(args)
-
-    self.assertEqual(error, None)
-    self.assertEqual(args.memory, "4G")
-
-    parser = self.set_up_parser("torq.py hw set -n 2 -m 4G")
-
-    args = parser.parse_args()
-    args, error = verify_args(args)
-
-    self.assertEqual(error, None)
-    self.assertEqual(args.num_cpus, 2)
-    self.assertEqual(args.memory, "4G")
-
-    parser = self.set_up_parser("torq.py hw set -m 4G -n 2")
-
-    args = parser.parse_args()
-    args, error = verify_args(args)
-
-    self.assertEqual(error, None)
-    self.assertEqual(args.memory, "4G")
-    self.assertEqual(args.num_cpus, 2)
-
-  def test_verify_args_invalid_hw_num_cpus_values(self):
-    parser = self.set_up_parser("torq.py hw set -n 0")
-
-    args = parser.parse_args()
-    args, error = verify_args(args)
-
-    self.assertEqual(error.message, ("Command is invalid because hw set"
-                                     " --num-cpus cannot be set to smaller"
-                                     " than 1."))
-    self.assertEqual(error.suggestion, ("Set hw set --num-cpus 1 to set 1"
-                                        " active core in hardware."))
-
-    parser = self.set_up_parser("torq.py hw set -n -1")
-
-    args = parser.parse_args()
-    args, error = verify_args(args)
-
-    self.assertEqual(error.message, ("Command is invalid because hw set"
-                                     " --num-cpus cannot be set to smaller"
-                                     " than 1."))
-    self.assertEqual(error.suggestion, ("Set hw set --num-cpus 1 to set 1"
-                                        " active core in hardware."))
-
-  def test_verify_args_invalid_hw_memory_values(self):
-    parser = self.set_up_parser("torq.py hw set -m 0G")
-
-    args = parser.parse_args()
-    args, error = verify_args(args)
-
-    self.assertEqual(error.message, ("Command is invalid because hw set"
-                                     " --memory cannot be set to smaller"
-                                     " than 1."))
-    self.assertEqual(error.suggestion, ("Set hw set --memory 4G to limit the"
-                                        " memory of the device to 4"
-                                        " gigabytes."))
-
-    parser = self.set_up_parser("torq.py hw set -m 4g")
-
-    args = parser.parse_args()
-    args, error = verify_args(args)
-
-    self.assertEqual(error.message, ("Command is invalid because the argument"
-                                     " for hw set --memory does not match"
-                                     " the <int>G format."))
-    self.assertEqual(error.suggestion, ("Set hw set --memory 4G to limit the"
-                                        " memory of the device to 4"
-                                        " gigabytes."))
-
-    parser = self.set_up_parser("torq.py hw set -m G")
-
-    args = parser.parse_args()
-    args, error = verify_args(args)
-
-    self.assertEqual(error.message, ("Command is invalid because the argument"
-                                     " for hw set --memory does not match"
-                                     " the <int>G format."))
-    self.assertEqual(error.suggestion, ("Set hw set --memory 4G to limit the"
-                                        " memory of the device to 4"
-                                        " gigabytes."))
-
-  def test_create_parser_invalid_hw_memory_values(self):
-    parser = self.set_up_parser("torq.py hw set -m -1G")
-
-    with self.assertRaises(SystemExit):
-      parser.parse_args()
-
-  def test_create_parser_valid_hw_set_values(self):
-    parser = self.set_up_parser("torq.py hw set seahawk")
-
-    args = parser.parse_args()
-    args, error = verify_args(args)
-
-    self.assertEqual(error, None)
-    self.assertEqual(args.hw_set_config, "seahawk")
-
-    parser = self.set_up_parser("torq.py hw set seaturtle")
-
-    args = parser.parse_args()
-    args, error = verify_args(args)
-
-    self.assertEqual(error, None)
-    self.assertEqual(args.hw_set_config, "seaturtle")
-
-  def test_create_parser_invalid_hw_set_values(self):
-    parser = self.set_up_parser("torq.py hw set fake-device")
-
-    with self.assertRaises(SystemExit):
-      parser.parse_args()
-
-  def test_create_parser_hw_set_invalid_dependencies(self):
-    parser = self.set_up_parser("torq.py set seahawk -n 2")
-
-    with self.assertRaises(SystemExit):
-      parser.parse_args()
-
-    parser = self.set_up_parser("torq.py set seahawk -m 4G")
-
-    with self.assertRaises(SystemExit):
-      parser.parse_args()
-
-    parser = self.set_up_parser("torq.py set seahawk -n 2 m 4G")
-
-    with self.assertRaises(SystemExit):
-      parser.parse_args()
-
-  def test_verify_args_invalid_hw_set_subcommands(self):
-    parser = self.set_up_parser("torq.py hw set")
-
-    args = parser.parse_args()
-    args, error = verify_args(args)
-
-    self.assertEqual(error.message, ("Command is invalid because torq hw set"
-                                     " cannot be called without a"
-                                     " subcommand."))
-    self.assertEqual(error.suggestion, ("Use one of the following"
-                                        " subcommands:\n"
-                                        "\t (torq hw set <config>,"
-                                        " torq hw set --num-cpus <int>,\n"
-                                        "\t torq hw set --memory <int>G,\n"
-                                        "\t torq hw set --num-cpus <int>"
-                                        " --memory <int>G,\n"
-                                        "\t torq hw set --memory <int>G"
-                                        " --num-cpus <int>)"))
-
-  def test_get_command_type_hw_set(self):
-    parser = self.set_up_parser("torq.py hw set seahawk")
-
-    args = parser.parse_args()
-    args, error = verify_args(args)
-    command = get_command_type(args)
-
-    self.assertEqual(error, None)
-    self.assertEqual(command.get_type(), "hw set")
-
-  def test_get_command_type_hw_get(self):
-    parser = self.set_up_parser("torq.py hw get")
-
-    args = parser.parse_args()
-    args, error = verify_args(args)
-    command = get_command_type(args)
-
-    self.assertEqual(error, None)
-    self.assertEqual(command.get_type(), "hw get")
-
-  def test_get_command_type_hw_list(self):
-    parser = self.set_up_parser("torq.py hw list")
-
-    args = parser.parse_args()
-    args, error = verify_args(args)
-    command = get_command_type(args)
-
-    self.assertEqual(error, None)
-    self.assertEqual(command.get_type(), "hw list")
 
   def test_verify_args_invalid_config_subcommands(self):
     parser = self.set_up_parser("torq.py config")
@@ -987,6 +892,25 @@ class TorqUnitTest(unittest.TestCase):
     self.assertEqual(error, None)
     self.assertEqual(args.file_path, "./memory.pbtxt")
 
+  @mock.patch.object(os.path, "isfile", autospec=True)
+  def test_verify_args_default_config_pull_invalid_filepath(self, mock_is_file):
+    mock_invalid_file_path = "mock-invalid-file-path"
+    mock_is_file.return_value = False
+    parser = self.set_up_parser(("torq.py config pull default %s"
+                                 % mock_invalid_file_path))
+
+    args = parser.parse_args()
+    args, error = verify_args(args)
+
+    self.assertEqual(error.message, (
+        "Command is invalid because %s is not a valid filepath."
+        % mock_invalid_file_path))
+    self.assertEqual(error.suggestion, (
+        "A default filepath can be used if you do not specify a file-path:\n\t"
+        " torq pull default to copy to ./default.pbtxt\n\t"
+        " torq pull lightweight to copy to ./lightweight.pbtxt\n\t "
+        "torq pull memory to copy to ./memory.pbtxt"))
+
   def test_get_command_type_config_list(self):
     parser = self.set_up_parser("torq.py config list")
 
@@ -1016,6 +940,35 @@ class TorqUnitTest(unittest.TestCase):
 
     self.assertEqual(error, None)
     self.assertEqual(command.get_type(), "config pull")
+
+  @mock.patch.object(os.path, "exists", autospec=True)
+  def test_create_parser_valid_open_subcommand(self, mock_exists):
+    mock_exists.return_value = True
+    parser = self.set_up_parser("torq.py open %s" % TEST_FILE)
+
+    args = parser.parse_args()
+    args, error = verify_args(args)
+
+    self.assertEqual(error, None)
+    self.assertEqual(args.file_path, TEST_FILE)
+
+  def test_create_parser_open_subcommand_no_file(self):
+    parser = self.set_up_parser("torq.py open")
+
+    with self.assertRaises(SystemExit):
+      parser.parse_args()
+
+  @mock.patch.object(os.path, "exists", autospec=True)
+  def test_create_parser_open_subcommand_invalid_file(self, mock_exists):
+    mock_exists.return_value = False
+    parser = self.set_up_parser("torq.py open %s" % TEST_FILE)
+
+    args = parser.parse_args()
+    args, error = verify_args(args)
+
+    self.assertEqual(error.message, "Command is invalid because %s is an "
+                                    "invalid file path." % TEST_FILE)
+    self.assertEqual(error.suggestion, "Make sure your file exists.")
 
 
 if __name__ == '__main__':
