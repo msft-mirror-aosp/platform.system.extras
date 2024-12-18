@@ -22,7 +22,7 @@ use std::env;
 const HELP_MSG: &str = r#"
 profcollectd background daemon.
 usage: profcollectd [command]
-    nostart       Start daemon but do not schedule profile collection.
+    help       Print help message.
 "#;
 
 fn main() -> Result<()> {
@@ -33,12 +33,11 @@ fn main() -> Result<()> {
         bail!("This program only takes one or no argument{}", &HELP_MSG);
     }
     if args.len() == 1 {
-        libprofcollectd::init_service(true)?;
+        libprofcollectd::init_service()?;
     }
 
     let action = &args[1];
     match action.as_str() {
-        "nostart" => libprofcollectd::init_service(false)?,
         "help" => println!("{}", &HELP_MSG),
         arg => bail!("Unknown argument: {}\n{}", &arg, &HELP_MSG),
     }
