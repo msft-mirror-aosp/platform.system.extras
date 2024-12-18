@@ -25,11 +25,8 @@ usage: profcollectctl [command]
 Command to control profcollectd behaviour.
 
 command:
-    start       Schedule periodic collection.
-    stop        Terminate periodic collection.
     trace       Request an one-off system-wide trace.
     process     Convert traces to perf profiles.
-    reconfig    Refresh configuration.
     report      Create a report containing all profiles.
     reset       Clear all local data.
     help        Print this message.
@@ -45,14 +42,6 @@ fn main() -> Result<()> {
 
     let action = &args[1];
     match action.as_str() {
-        "start" => {
-            println!("Scheduling profile collection");
-            libprofcollectd::schedule().context("Failed to schedule collection.")?;
-        }
-        "stop" => {
-            println!("Terminating profile collection");
-            libprofcollectd::terminate().context("Failed to terminate collection.")?;
-        }
         "trace" => {
             println!("Performing system-wide trace");
             libprofcollectd::trace_system("manual").context("Failed to trace.")?;

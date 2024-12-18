@@ -48,7 +48,7 @@ class DebugElfFileFinder {
 
  private:
   void CollectBuildIdInDir(const std::string& dir);
-  std::optional<std::string> SearchFileMapByPath(const std::string& path);
+  std::optional<std::string> SearchFileMapByPath(std::string_view path);
   bool CheckDebugFilePath(const std::string& path, BuildId& build_id,
                           bool report_build_id_mismatch);
 
@@ -57,6 +57,7 @@ class DebugElfFileFinder {
   std::string vdso_32bit_;
   std::string symfs_dir_;
   std::unordered_map<std::string, std::string> build_id_to_file_map_;
+  std::vector<std::string> no_build_id_files_;
 };
 
 }  // namespace simpleperf_dso_impl
