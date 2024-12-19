@@ -463,6 +463,16 @@ std::vector<int> EventType::GetPmuCpumask() {
   return empty_result;
 }
 
+uint64_t EventType::GetIntelAtomCpuConfig() const {
+  if (auto pos = limited_arch.find("atom="); pos != std::string::npos) {
+    uint64_t atom_config;
+    if (android::base::ParseUint(limited_arch.substr(pos + 5), &atom_config)) {
+      return atom_config;
+    }
+  }
+  return config;
+}
+
 std::string ScopedEventTypes::BuildString(const std::vector<const EventType*>& event_types) {
   std::string result;
   for (auto type : event_types) {
