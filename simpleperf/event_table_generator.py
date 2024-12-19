@@ -189,7 +189,10 @@ class X86ArchData:
             number = int(event[0], 16)
             name = event[1]
             desc = event[2]
-            self.events.append(RawEvent(number, name, desc, self.arch))
+            limited_arch = self.arch
+            if len(event) > 3:
+                limited_arch += ":" + event[3]
+            self.events.append(RawEvent(number, name, desc, limited_arch))
 
 
 class RawEventGenerator:
@@ -210,7 +213,7 @@ class RawEventGenerator:
             lines = []
             for event in events:
                 lines.append(gen_event_type_entry_str(event.name, 'PERF_TYPE_RAW', '0x%x' %
-                         event.number, event.desc, event.limited_arch))
+                                                      event.number, event.desc, event.limited_arch))
             return guard(''.join(lines))
 
         lines_arm64 = generate_event_entries(self.arm64_data.events, self.add_arm_guard)

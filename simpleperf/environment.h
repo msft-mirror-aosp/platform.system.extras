@@ -173,6 +173,7 @@ struct CpuModel {
 };
 
 std::vector<CpuModel> GetCpuModels();
+std::set<int> GetX86IntelAtomCpus();
 
 #endif  // defined(__linux__)
 
