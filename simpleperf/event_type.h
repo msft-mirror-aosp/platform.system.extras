@@ -58,6 +58,7 @@ struct EventType {
   bool IsTracepointEvent() const { return type == PERF_TYPE_TRACEPOINT; }
 
   std::vector<int> GetPmuCpumask();
+  uint64_t GetIntelAtomCpuConfig() const;
 
   std::string name;
   uint32_t type;
