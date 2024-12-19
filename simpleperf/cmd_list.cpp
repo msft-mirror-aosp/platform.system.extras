@@ -25,6 +25,7 @@
 
 #include <android-base/file.h>
 #include <android-base/logging.h>
+#include <android-base/strings.h>
 
 #include "ETMRecorder.h"
 #include "RegEx.h"
@@ -157,7 +158,11 @@ class RawEventSupportChecker {
           got_status = true;
         }
       } else if (model.arch == "x86") {
-        if (event_type.limited_arch != model_name) {
+        std::string limited_arch = event_type.limited_arch;
+        if (auto pos = limited_arch.find(':'); pos != std::string::npos) {
+          limited_arch = limited_arch.substr(0, pos);
+        }
+        if (limited_arch != model_name) {
           supported = false;
           got_status = true;
         }
@@ -196,10 +201,10 @@ class RawEventSupportChecker {
       return it->second;
     }
 #elif defined(__i386__) || defined(__x86_64__)
-    if (model.x86_data.vendor_id == "GenuineIntel") {
+    if (android::base::StartsWith(model.x86_data.vendor_id, "GenuineIntel")) {
       return "x86-intel";
     }
-    if (model.x86_data.vendor_id == "AuthenticAMD") {
+    if (android::base::StartsWith(model.x86_data.vendor_id, "AuthenticAMD")) {
       return "x86-amd";
     }
 #endif  // defined(__i386__) || defined(__x86_64__)
@@ -220,6 +225,12 @@ class RawEventSupportChecker {
       std::this_thread::sleep_for(std::chrono::milliseconds(1));
     }
     perf_event_attr attr = CreateDefaultPerfEventAttr(event_type);
+#if defined(__i386__) || defined(__x86_64__)
+    std::set<int> atom_cpus = GetX86IntelAtomCpus();
+    if (atom_cpus.count(cpu) > 0) {
+      attr.config = event_type.GetIntelAtomCpuConfig();
+    }
+#endif  // defined(__i386__) || defined(__x86_64__)
     std::unique_ptr<EventFd> event_fd = EventFd::OpenEventFile(
         attr, test_thread_arg.tid, test_thread_arg.cpu, nullptr, event_type.name, false);
     test_thread_arg.start = true;
