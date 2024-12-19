@@ -1101,6 +1101,7 @@ class CPUModelParser {
   }
 
   std::vector<CpuModel> ParseX86CpuModel(const std::vector<std::string>& lines) {
+    std::set<int> atom_cpus = GetX86IntelAtomCpus();
     std::vector<CpuModel> cpu_models;
     uint32_t processor = 0;
     CpuModel model;
@@ -1112,6 +1113,9 @@ class CPUModelParser {
         parsed |= 1;
       } else if (name == "vendor_id") {
         model.x86_data.vendor_id = value;
+        if (atom_cpus.count(static_cast<int>(processor)) > 0) {
+          model.x86_data.vendor_id += "-atom";
+        }
         AddCpuModel(processor, model, cpu_models);
         parsed = 0;
       }
@@ -1179,6 +1183,15 @@ std::vector<CpuModel> GetCpuModels() {
 #else
   return {};
 #endif
+}
+
+std::set<int> GetX86IntelAtomCpus() {
+  std::string data;
+  if (!android::base::ReadFileToString("/sys/devices/cpu_atom/cpus", &data)) {
+    return {};
+  }
+  std::optional<std::set<int>> atom_cpus = GetCpusFromString(data);
+  return atom_cpus.has_value() ? atom_cpus.value() : std::set<int>();
 }
 
 }  // namespace simpleperf
