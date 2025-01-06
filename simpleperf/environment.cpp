@@ -918,18 +918,33 @@ int GetAndroidVersion() {
   static int android_version = -1;
   if (android_version == -1) {
     android_version = 0;
+
+    auto parse_version = [&](const std::string& s) {
+      // The release string can be a list of numbers (like 8.1.0), a character (like Q)
+      // or many characters (like OMR1).
+      if (!s.empty()) {
+        // Each Android version has a version number: L is 5, M is 6, N is 7, O is 8, etc.
+        if (s[0] >= 'L' && s[0] <= 'V') {
+          android_version = s[0] - 'P' + kAndroidVersionP;
+        } else if (isdigit(s[0])) {
+          sscanf(s.c_str(), "%d", &android_version);
+        }
+      }
+    };
     std::string s = android::base::GetProperty("ro.build.version.codename", "REL");
-    if (s == "REL") {
-      s = android::base::GetProperty("ro.build.version.release", "");
+    if (s != "REL") {
+      parse_version(s);
     }
-    // The release string can be a list of numbers (like 8.1.0), a character (like Q)
-    // or many characters (like OMR1).
-    if (!s.empty()) {
-      // Each Android version has a version number: L is 5, M is 6, N is 7, O is 8, etc.
-      if (s[0] >= 'A' && s[0] <= 'Z') {
-        android_version = s[0] - 'P' + kAndroidVersionP;
-      } else if (isdigit(s[0])) {
-        sscanf(s.c_str(), "%d", &android_version);
+    if (android_version == 0) {
+      s = android::base::GetProperty("ro.build.version.release", "");
+      parse_version(s);
+    }
+    if (android_version == 0) {
+      s = android::base::GetProperty("ro.build.version.sdk", "");
+      int sdk_version = 0;
+      const int SDK_VERSION_V = 35;
+      if (sscanf(s.c_str(), "%d", &sdk_version) == 1 && sdk_version >= SDK_VERSION_V) {
+        android_version = kAndroidVersionV;
       }
     }
   }
@@ -1086,6 +1101,7 @@ class CPUModelParser {
   }
 
   std::vector<CpuModel> ParseX86CpuModel(const std::vector<std::string>& lines) {
+    std::set<int> atom_cpus = GetX86IntelAtomCpus();
     std::vector<CpuModel> cpu_models;
     uint32_t processor = 0;
     CpuModel model;
@@ -1097,6 +1113,9 @@ class CPUModelParser {
         parsed |= 1;
       } else if (name == "vendor_id") {
         model.x86_data.vendor_id = value;
+        if (atom_cpus.count(static_cast<int>(processor)) > 0) {
+          model.x86_data.vendor_id += "-atom";
+        }
         AddCpuModel(processor, model, cpu_models);
         parsed = 0;
       }
@@ -1164,6 +1183,15 @@ std::vector<CpuModel> GetCpuModels() {
 #else
   return {};
 #endif
+}
+
+std::set<int> GetX86IntelAtomCpus() {
+  std::string data;
+  if (!android::base::ReadFileToString("/sys/devices/cpu_atom/cpus", &data)) {
+    return {};
+  }
+  std::optional<std::set<int>> atom_cpus = GetCpusFromString(data);
+  return atom_cpus.has_value() ? atom_cpus.value() : std::set<int>();
 }
 
 }  // namespace simpleperf

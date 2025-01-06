@@ -14,6 +14,7 @@
 # limitations under the License.
 #
 
+import os
 import unittest
 import subprocess
 import sys
@@ -25,7 +26,6 @@ from validation_error import ValidationError
 from torq import DEFAULT_DUR_MS, DEFAULT_OUT_DIR, PREDEFINED_PERFETTO_CONFIGS
 
 PROFILER_COMMAND_TYPE = "profiler"
-PROFILER_TYPE = "perfetto"
 TEST_ERROR_MSG = "test-error"
 TEST_EXCEPTION = Exception(TEST_ERROR_MSG)
 TEST_VALIDATION_ERROR = ValidationError(TEST_ERROR_MSG, None)
@@ -374,9 +374,9 @@ class ProfilerCommandExecutorUnitTest(unittest.TestCase):
 
   def setUp(self):
     self.command = ProfilerCommand(
-        PROFILER_COMMAND_TYPE, "custom", PROFILER_TYPE, DEFAULT_OUT_DIR, DEFAULT_DUR_MS,
+        PROFILER_COMMAND_TYPE, "custom", "perfetto", DEFAULT_OUT_DIR, DEFAULT_DUR_MS,
         None, 1, None, DEFAULT_PERFETTO_CONFIG, None, False, None, None, None,
-        None)
+        None, None, None)
     self.mock_device = mock.create_autospec(AdbDevice, instance=True,
                                             serial=TEST_SERIAL)
     self.mock_device.check_device_connection.return_value = None
@@ -392,6 +392,46 @@ class ProfilerCommandExecutorUnitTest(unittest.TestCase):
 
       self.assertEqual(error, None)
       self.assertEqual(self.mock_device.pull_file.call_count, 1)
+
+  @mock.patch.object(subprocess, "run", autospec=True)
+  @mock.patch.object(subprocess, "Popen", autospec=True)
+  @mock.patch.object(os.path, "exists", autospec=True)
+  def test_execute_one_simpleperf_run_success(self,
+      mock_exists, mock_process, mock_run):
+    with mock.patch("command_executor.open_trace", autospec=True):
+      self.mock_device.start_simpleperf_trace.return_value = mock_process
+      mock_exists.return_value = True
+      mock_run.return_value = None
+      simpleperf_command = ProfilerCommand(
+          PROFILER_COMMAND_TYPE, "custom", "simpleperf", DEFAULT_OUT_DIR,
+          DEFAULT_DUR_MS, None, 1, None, DEFAULT_PERFETTO_CONFIG, None, False,
+          None, None, None, None, "/", "/")
+      simpleperf_command.use_ui = True
+
+      error = simpleperf_command.execute(self.mock_device)
+
+      self.assertEqual(error, None)
+      self.assertEqual(self.mock_device.pull_file.call_count, 1)
+
+  @mock.patch.object(subprocess, "run", autospec=True)
+  @mock.patch.object(subprocess, "Popen", autospec=True)
+  @mock.patch.object(os.path, "exists", autospec=True)
+  def test_execute_one_simpleperf_run_failure(self,
+      mock_exists, mock_process, mock_run):
+    with mock.patch("command_executor.open_trace", autospec=True):
+      self.mock_device.start_simpleperf_trace.return_value = mock_process
+      mock_exists.return_value = False
+      mock_run.return_value = None
+      simpleperf_command = ProfilerCommand(
+          PROFILER_COMMAND_TYPE, "custom", "simpleperf", DEFAULT_OUT_DIR,
+          DEFAULT_DUR_MS, None, 1, None, DEFAULT_PERFETTO_CONFIG, None, False,
+          None, None, None, None, "/", "/")
+      simpleperf_command.use_ui = True
+
+      with self.assertRaises(Exception) as e:
+        simpleperf_command.execute(self.mock_device)
+
+        self.assertEqual(str(e.exception), "Gecko file was not created.")
 
   @mock.patch.object(subprocess, "Popen", autospec=True)
   def test_execute_one_run_no_ui_success(self, mock_process):
@@ -563,9 +603,9 @@ class UserSwitchCommandExecutorUnitTest(unittest.TestCase):
 
   def setUp(self):
     self.command = ProfilerCommand(
-        PROFILER_COMMAND_TYPE, "user-switch", PROFILER_TYPE, DEFAULT_OUT_DIR,
+        PROFILER_COMMAND_TYPE, "user-switch", "perfetto", DEFAULT_OUT_DIR,
         DEFAULT_DUR_MS, None, 1, None, DEFAULT_PERFETTO_CONFIG, None, False,
-        None, None, None, None)
+        None, None, None, None, None, None)
     self.mock_device = mock.create_autospec(AdbDevice, instance=True,
                                             serial=TEST_SERIAL)
     self.mock_device.check_device_connection.return_value = None
@@ -687,9 +727,9 @@ class BootCommandExecutorUnitTest(unittest.TestCase):
 
   def setUp(self):
     self.command = ProfilerCommand(
-        PROFILER_COMMAND_TYPE, "boot", PROFILER_TYPE, DEFAULT_OUT_DIR,
+        PROFILER_COMMAND_TYPE, "boot", "perfetto", DEFAULT_OUT_DIR,
         TEST_DURATION, None, 1, None, DEFAULT_PERFETTO_CONFIG, TEST_DURATION,
-        False, None, None, None, None)
+        False, None, None, None, None, None, None)
     self.mock_device = mock.create_autospec(AdbDevice, instance=True,
                                             serial=TEST_SERIAL)
     self.mock_device.check_device_connection.return_value = None
@@ -801,9 +841,9 @@ class AppStartupExecutorUnitTest(unittest.TestCase):
 
   def setUp(self):
     self.command = ProfilerCommand(
-        PROFILER_COMMAND_TYPE, "app-startup", PROFILER_TYPE, DEFAULT_OUT_DIR,
+        PROFILER_COMMAND_TYPE, "app-startup", "perfetto", DEFAULT_OUT_DIR,
         DEFAULT_DUR_MS, TEST_PACKAGE_1, 1, None, DEFAULT_PERFETTO_CONFIG, None,
-        False, None, None, None, None)
+        False, None, None, None, None, None, None)
     self.mock_device = mock.create_autospec(AdbDevice, instance=True,
                                             serial=TEST_SERIAL)
     self.mock_device.check_device_connection.return_value = None
@@ -921,6 +961,11 @@ class ConfigCommandExecutorUnitTest(unittest.TestCase):
     self.mock_device.get_android_sdk_version.return_value = (
         ANDROID_SDK_VERSION_T)
 
+  @staticmethod
+  def generate_mock_completed_process(stdout_string=b'\n', stderr_string=b'\n'):
+    return mock.create_autospec(subprocess.CompletedProcess, instance=True,
+                                stdout=stdout_string, stderr=stderr_string)
+
   def test_config_list(self):
     terminal_output = io.StringIO()
     sys.stdout = terminal_output
@@ -969,6 +1014,40 @@ class ConfigCommandExecutorUnitTest(unittest.TestCase):
     self.assertEqual(error, None)
     self.assertEqual(terminal_output.getvalue(),
                      TEST_DEFAULT_CONFIG_OLD_ANDROID)
+
+  @mock.patch.object(subprocess, "run", autospec=True)
+  def test_config_pull(self, mock_subprocess_run):
+    mock_subprocess_run.return_value = self.generate_mock_completed_process()
+    self.command = ConfigCommand("config pull", "default", None, DEFAULT_DUR_MS,
+                                 None, None)
+
+    error = self.command.execute(self.mock_device)
+
+    self.assertEqual(error, None)
+
+  @mock.patch.object(subprocess, "run", autospec=True)
+  def test_config_pull_no_device_connection(self, mock_subprocess_run):
+    self.mock_device.check_device_connection.return_value = (
+        TEST_VALIDATION_ERROR)
+    mock_subprocess_run.return_value = self.generate_mock_completed_process()
+    self.command = ConfigCommand("config pull", "default", None, DEFAULT_DUR_MS,
+                                 None, None)
+
+    error = self.command.execute(self.mock_device)
+
+    self.assertEqual(error, None)
+
+  @mock.patch.object(subprocess, "run", autospec=True)
+  def test_config_pull_old_android_version(self, mock_subprocess_run):
+    self.mock_device.get_android_sdk_version.return_value = (
+        ANDROID_SDK_VERSION_S)
+    mock_subprocess_run.return_value = self.generate_mock_completed_process()
+    self.command = ConfigCommand("config pull", "default", None, DEFAULT_DUR_MS,
+                                 None, None)
+
+    error = self.command.execute(self.mock_device)
+
+    self.assertEqual(error, None)
 
 
 if __name__ == '__main__':

@@ -221,14 +221,17 @@ class PerfDataReader {
 
 class ETMThreadTreeWithFilter : public ETMThreadTree {
  public:
-  ETMThreadTreeWithFilter(ThreadTree& thread_tree, std::optional<int>& exclude_pid)
-      : thread_tree_(thread_tree), exclude_pid_(exclude_pid) {}
+  ETMThreadTreeWithFilter(ThreadTree& thread_tree, std::optional<int>& exclude_pid,
+                          const std::vector<std::unique_ptr<RegEx>>& exclude_process_names)
+      : thread_tree_(thread_tree),
+        exclude_pid_(exclude_pid),
+        exclude_process_names_(exclude_process_names) {}
 
   void DisableThreadExitRecords() override { thread_tree_.DisableThreadExitRecords(); }
 
   const ThreadEntry* FindThread(int tid) override {
     const ThreadEntry* thread = thread_tree_.FindThread(tid);
-    if (thread != nullptr && exclude_pid_ && thread->pid == exclude_pid_) {
+    if (thread != nullptr && ShouldExcludePid(thread->pid)) {
       return nullptr;
     }
     return thread;
@@ -237,18 +240,37 @@ class ETMThreadTreeWithFilter : public ETMThreadTree {
   const MapSet& GetKernelMaps() override { return thread_tree_.GetKernelMaps(); }
 
  private:
+  bool ShouldExcludePid(int pid) {
+    if (exclude_pid_ && pid == exclude_pid_) {
+      return true;
+    }
+    if (!exclude_process_names_.empty()) {
+      const ThreadEntry* process = thread_tree_.FindThread(pid);
+      if (process != nullptr) {
+        for (const auto& regex : exclude_process_names_) {
+          if (regex->Search(process->comm)) {
+            return true;
+          }
+        }
+      }
+    }
+    return false;
+  }
+
   ThreadTree& thread_tree_;
   std::optional<int>& exclude_pid_;
+  const std::vector<std::unique_ptr<RegEx>>& exclude_process_names_;
 };
 
 // Read perf.data with ETM data and generate AutoFDO or branch list data.
 class ETMPerfDataReader : public PerfDataReader {
  public:
   ETMPerfDataReader(std::unique_ptr<RecordFileReader> reader, bool exclude_perf,
+                    const std::vector<std::unique_ptr<RegEx>>& exclude_process_names,
                     const RegEx* binary_name_regex, ETMDumpOption etm_dump_option)
       : PerfDataReader(std::move(reader), exclude_perf, binary_name_regex),
         etm_dump_option_(etm_dump_option),
-        etm_thread_tree_(thread_tree_, exclude_pid_) {}
+        etm_thread_tree_(thread_tree_, exclude_pid_, exclude_process_names) {}
 
   bool Read() override {
     if (reader_->HasFeature(PerfFileFormat::FEAT_ETM_BRANCH_LIST)) {
@@ -522,20 +544,13 @@ class BranchListReader {
   void AddCallback(const LBRDataCallback& callback) { lbr_data_callback_ = callback; }
 
   bool Read() {
-    std::string s;
-    if (!android::base::ReadFileToString(filename_, &s)) {
-      PLOG(ERROR) << "failed to read " << filename_;
+    auto reader = BranchListProtoReader::CreateForFile(filename_);
+    if (!reader) {
       return false;
-    }
-    if (android::base::EndsWith(filename_, ".zst")) {
-      if (!ZstdDecompress(s.data(), s.size(), s)) {
-        return false;
-      }
     }
     ETMBinaryMap etm_data;
     LBRData lbr_data;
-    if (!ParseBranchListData(s, etm_data, lbr_data)) {
-      PLOG(ERROR) << "file is in wrong format: " << filename_;
+    if (!reader->Read(etm_data, lbr_data)) {
       return false;
     }
     if (etm_binary_callback_ && !etm_data.empty()) {
@@ -985,28 +1000,19 @@ class BranchListMergedReader {
 // Write branch lists to a protobuf file specified by branch_list.proto.
 static bool WriteBranchListFile(const std::string& output_filename, const ETMBinaryMap& etm_data,
                                 const LBRData& lbr_data, bool compress) {
-  std::string s;
+  auto writer = BranchListProtoWriter::CreateForFile(output_filename, compress);
+  if (!writer) {
+    return false;
+  }
   if (!etm_data.empty()) {
-    if (!ETMBinaryMapToString(etm_data, s)) {
-      return false;
-    }
-  } else if (!lbr_data.samples.empty()) {
-    if (!LBRDataToString(lbr_data, s)) {
-      return false;
-    }
-  } else {
-    // Don't produce empty output file.
-    LOG(INFO) << "Skip empty output file.";
-    unlink(output_filename.c_str());
-    return true;
+    return writer->Write(etm_data);
   }
-  if (compress && !ZstdCompress(s.data(), s.size(), s)) {
-    return false;
+  if (!lbr_data.samples.empty()) {
+    return writer->Write(lbr_data);
   }
-  if (!android::base::WriteStringToFile(s, output_filename)) {
-    PLOG(ERROR) << "failed to write to " << output_filename;
-    return false;
-  }
+  // Don't produce empty output file.
+  LOG(INFO) << "Skip empty output file.";
+  unlink(output_filename.c_str());
   return true;
 }
 
@@ -1030,10 +1036,13 @@ class InjectCommand : public Command {
 "                             Default is autofdo.\n"
 "--dump-etm type1,type2,...   Dump etm data. A type is one of raw, packet and element.\n"
 "--exclude-perf               Exclude trace data for the recording process.\n"
+"--exclude-process-name process_name_regex      Exclude data for processes with name containing\n"
+"                                               the regular expression.\n"
 "--symdir <dir>               Look for binaries in a directory recursively.\n"
 "--allow-mismatched-build-id  Allow mismatched build ids when searching for debug binaries.\n"
 "-j <jobs>                    Use multiple threads to process branch list files.\n"
 "-z                           Compress branch-list output\n"
+"--dump <file>                Dump a branch list file.\n"
 "\n"
 "Examples:\n"
 "1. Generate autofdo text output.\n"
@@ -1049,6 +1058,9 @@ class InjectCommand : public Command {
     GOOGLE_PROTOBUF_VERIFY_VERSION;
     if (!ParseOptions(args)) {
       return false;
+    }
+    if (!dump_branch_list_file_.empty()) {
+      return DumpBranchListFile(dump_branch_list_file_);
     }
 
     CHECK(!input_filenames_.empty());
@@ -1078,8 +1090,10 @@ class InjectCommand : public Command {
     const OptionFormatMap option_formats = {
         {"--allow-mismatched-build-id", {OptionValueType::NONE, OptionType::SINGLE}},
         {"--binary", {OptionValueType::STRING, OptionType::SINGLE}},
+        {"--dump", {OptionValueType::STRING, OptionType::SINGLE}},
         {"--dump-etm", {OptionValueType::STRING, OptionType::SINGLE}},
         {"--exclude-perf", {OptionValueType::NONE, OptionType::SINGLE}},
+        {"--exclude-process-name", {OptionValueType::STRING, OptionType::MULTIPLE}},
         {"-i", {OptionValueType::STRING, OptionType::MULTIPLE}},
         {"-j", {OptionValueType::UINT, OptionType::SINGLE}},
         {"-o", {OptionValueType::STRING, OptionType::SINGLE}},
@@ -1103,12 +1117,20 @@ class InjectCommand : public Command {
         return false;
       }
     }
+    options.PullStringValue("--dump", &dump_branch_list_file_);
     if (auto value = options.PullValue("--dump-etm"); value) {
       if (!ParseEtmDumpOption(value->str_value, &etm_dump_option_)) {
         return false;
       }
     }
     exclude_perf_ = options.PullBoolValue("--exclude-perf");
+    for (const std::string& value : options.PullStringValues("--exclude-process-name")) {
+      std::unique_ptr<RegEx> regex = RegEx::Create(value);
+      if (regex == nullptr) {
+        return false;
+      }
+      exclude_process_names_.emplace_back(std::move(regex));
+    }
 
     for (const OptionValue& value : options.PullValues("-i")) {
       std::vector<std::string> files = android::base::Split(value.str_value, ",");
@@ -1155,11 +1177,6 @@ class InjectCommand : public Command {
     }
     compress_ = options.PullBoolValue("-z");
     CHECK(options.values.empty());
-
-    if (compress_ && !android::base::EndsWith(output_filename_, ".zst")) {
-      LOG(ERROR) << "When -z is used, output filename should has a .zst suffix";
-      return false;
-    }
     return true;
   }
 
@@ -1195,7 +1212,8 @@ class InjectCommand : public Command {
       std::unique_ptr<PerfDataReader> reader;
       if (data_type == "etm") {
         reader.reset(new ETMPerfDataReader(std::move(file_reader), exclude_perf_,
-                                           binary_name_regex_.get(), etm_dump_option_));
+                                           exclude_process_names_, binary_name_regex_.get(),
+                                           etm_dump_option_));
       } else if (data_type == "lbr") {
         reader.reset(
             new LBRPerfDataReader(std::move(file_reader), exclude_perf_, binary_name_regex_.get()));
@@ -1306,6 +1324,7 @@ class InjectCommand : public Command {
 
   std::unique_ptr<RegEx> binary_name_regex_;
   bool exclude_perf_ = false;
+  std::vector<std::unique_ptr<RegEx>> exclude_process_names_;
   std::vector<std::string> input_filenames_;
   std::string output_filename_ = "perf_inject.data";
   OutputFormat output_format_ = OutputFormat::AutoFDO;
@@ -1313,6 +1332,7 @@ class InjectCommand : public Command {
   bool compress_ = false;
   bool allow_mismatched_build_id_ = false;
   size_t jobs_ = 1;
+  std::string dump_branch_list_file_;
 
   std::unique_ptr<Dso> placeholder_dso_;
 };

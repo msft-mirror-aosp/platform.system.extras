@@ -666,8 +666,18 @@ bool EventSelectionSet::OpenEventFilesOnGroup(EventSelectionGroup& group, pid_t 
   // successfully or all failed to open.
   EventFd* group_fd = nullptr;
   for (auto& selection : group.selections) {
+#if defined(__i386__) || defined(__x86_64__)
+    perf_event_attr attr = selection.event_attr;
+    std::set<int> atom_cpus = GetX86IntelAtomCpus();
+    if (atom_cpus.count(cpu) > 0) {
+      attr.config = selection.event_type_modifier.event_type.GetIntelAtomCpuConfig();
+    }
+    std::unique_ptr<EventFd> event_fd =
+        EventFd::OpenEventFile(attr, tid, cpu, group_fd, selection.event_type_modifier.name, false);
+#else   // defined(__i386__) || defined(__x86_64__)
     std::unique_ptr<EventFd> event_fd = EventFd::OpenEventFile(
         selection.event_attr, tid, cpu, group_fd, selection.event_type_modifier.name, false);
+#endif  // defined(__i386__) || defined(__x86_64__)
     if (!event_fd) {
       *failed_event_type = selection.event_type_modifier.name;
       return false;

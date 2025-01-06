@@ -122,6 +122,9 @@ enum {
   kAndroidVersionQ = 10,
   kAndroidVersionR = 11,
   kAndroidVersionS = 12,
+  kAndroidVersionT = 13,
+  kAndroidVersionU = 14,
+  kAndroidVersionV = 15,
 };
 
 // Return 0 if no android version.
@@ -170,6 +173,7 @@ struct CpuModel {
 };
 
 std::vector<CpuModel> GetCpuModels();
+std::set<int> GetX86IntelAtomCpus();
 
 #endif  // defined(__linux__)
 

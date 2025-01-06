@@ -99,7 +99,7 @@ class AdbDevice:
                        " being rooted." % self.serial))
 
   def remove_file(self, file_path):
-    subprocess.run(["adb", "-s", self.serial, "shell", "rm", file_path])
+    subprocess.run(["adb", "-s", self.serial, "shell", "rm", "-f", file_path])
 
   def start_perfetto_trace(self, config):
     return subprocess.Popen(("adb -s %s shell perfetto -c - --txt -o"
@@ -110,8 +110,8 @@ class AdbDevice:
   def start_simpleperf_trace(self, command):
     events_param = "-e " + ",".join(command.simpleperf_event)
     return subprocess.Popen(("adb -s %s shell simpleperf record -a -f 1000 "
-                             "--post-unwind=yes -m 8192 -g --duration %d"
-                             " %s -o %s"
+                             "--exclude-perf --post-unwind=yes -m 8192 -g "
+                             "--duration %d %s -o %s"
                              % (self.serial,
                                 int(math.ceil(command.dur_ms/1000)),
                                 events_param, SIMPLEPERF_TRACE_FILE)),
@@ -155,6 +155,12 @@ class AdbDevice:
 
   def reboot(self):
     subprocess.run(["adb", "-s", self.serial, "reboot"])
+    if not self.poll_is_task_completed(ADB_ROOT_TIMED_OUT_LIMIT_SECS,
+                                       POLLING_INTERVAL_SECS,
+                                       lambda: self.serial not in
+                                               self.get_adb_devices()):
+      raise Exception(("Device with serial %s took too long to start"
+                       " rebooting." % self.serial))
 
   def wait_for_device(self):
     subprocess.run(["adb", "-s", self.serial, "wait-for-device"])

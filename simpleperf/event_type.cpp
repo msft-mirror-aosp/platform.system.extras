@@ -44,7 +44,7 @@ struct EventFormat {
   int shift;
 };
 
-extern std::set<EventType> builtin_event_types;
+void LoadBuiltinEventTypes(std::set<EventType>&);
 
 enum class EventFinderType {
   BUILTIN,
@@ -93,7 +93,7 @@ class BuiltinTypeFinder : public EventTypeFinder {
   BuiltinTypeFinder() : EventTypeFinder(EventFinderType::BUILTIN) {}
 
  protected:
-  void LoadTypes() override { types_ = std::move(builtin_event_types); }
+  void LoadTypes() override { LoadBuiltinEventTypes(types_); }
 };
 
 class TracepointStringFinder : public EventTypeFinder {
@@ -461,6 +461,16 @@ std::vector<int> EventType::GetPmuCpumask() {
     return std::vector<int>(cpus->begin(), cpus->end());
   }
   return empty_result;
+}
+
+uint64_t EventType::GetIntelAtomCpuConfig() const {
+  if (auto pos = limited_arch.find("atom="); pos != std::string::npos) {
+    uint64_t atom_config;
+    if (android::base::ParseUint(limited_arch.substr(pos + 5), &atom_config)) {
+      return atom_config;
+    }
+  }
+  return config;
 }
 
 std::string ScopedEventTypes::BuildString(const std::vector<const EventType*>& event_types) {

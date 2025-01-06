@@ -17,8 +17,9 @@
 from abc import ABC, abstractmethod
 from command_executor import ProfilerCommandExecutor, \
   UserSwitchCommandExecutor, BootCommandExecutor, AppStartupCommandExecutor, \
-  ConfigCommandExecutor
+  ConfigCommandExecutor, WEB_UI_ADDRESS
 from validation_error import ValidationError
+from open_ui import open_trace
 
 ANDROID_SDK_VERSION_T = 33
 
@@ -47,7 +48,8 @@ class ProfilerCommand(Command):
   """
   def __init__(self, type, event, profiler, out_dir, dur_ms, app, runs,
       simpleperf_event, perfetto_config, between_dur_ms, ui,
-      excluded_ftrace_events, included_ftrace_events, from_user, to_user):
+      excluded_ftrace_events, included_ftrace_events, from_user, to_user,
+      scripts_path, symbols):
     super().__init__(type)
     self.event = event
     self.profiler = profiler
@@ -63,6 +65,8 @@ class ProfilerCommand(Command):
     self.included_ftrace_events = included_ftrace_events
     self.from_user = from_user
     self.to_user = to_user
+    self.scripts_path = scripts_path
+    self.symbols = symbols
     match event:
       case "custom":
         self.command_executor = ProfilerCommandExecutor()
@@ -152,3 +156,18 @@ class ConfigCommand(Command):
 
   def validate(self, device):
     raise NotImplementedError
+
+
+class OpenCommand(Command):
+  """
+  Represents commands which open traces.
+  """
+  def __init__(self, file_path):
+    super().__init__(type)
+    self.file_path = file_path
+
+  def validate(self, device):
+    raise NotImplementedError
+
+  def execute(self, device):
+    open_trace(self.file_path, WEB_UI_ADDRESS)
