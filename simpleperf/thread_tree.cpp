@@ -202,6 +202,14 @@ void ThreadTree::AddThreadMapsForDsoSymbols(ThreadEntry* thread, Dso* dso) {
   }
 }
 
+Dso* ThreadTree::FindUserDso(const std::string& filename) {
+  auto it = user_dso_tree_.find(filename);
+  if (it == user_dso_tree_.end()) {
+    return nullptr;
+  }
+  return it->second.get();
+}
+
 Dso* ThreadTree::FindUserDsoOrNew(const std::string& filename, uint64_t start_addr,
                                   DsoType dso_type) {
   auto it = user_dso_tree_.find(filename);
