@@ -23,6 +23,7 @@
 #include <android-base/logging.h>
 #include <android-base/strings.h>
 
+#include "ETMDecoder.h"
 #include "JITDebugReader.h"
 #include "RecordFilter.h"
 #include "dso.h"
@@ -108,6 +109,22 @@ struct FeatureSection {
   uint32_t data_size;
 };
 
+struct BuildIdPair {
+  const unsigned char* build_id;
+  const char* filename;
+};
+
+struct DsoAddress {
+  const char* path;
+  uint64_t offset;
+};
+
+struct Thread {
+  int pid;
+  int tid;
+  const char* comm;
+};
+
 }  // extern "C"
 
 namespace simpleperf {
@@ -175,6 +192,18 @@ struct TraceOffCpuData {
 
 }  // namespace
 
+using UserCallback = ETMDecoder::UserCallback;
+class ETMThreadTreeSimple : public ETMThreadTree {
+ public:
+  ETMThreadTreeSimple(ThreadTree& thread_tree) : thread_tree_(thread_tree) {}
+  void DisableThreadExitRecords() override { thread_tree_.DisableThreadExitRecords(); }
+  const ThreadEntry* FindThread(int tid) override { return thread_tree_.FindThread(tid); }
+  const MapSet& GetKernelMaps() override { return thread_tree_.GetKernelMaps(); }
+
+ private:
+  ThreadTree& thread_tree_;
+};
+
 class ReportLib {
  public:
   ReportLib()
@@ -182,7 +211,8 @@ class ReportLib {
         record_filename_("perf.data"),
         current_thread_(nullptr),
         callchain_report_builder_(thread_tree_),
-        record_filter_(thread_tree_) {}
+        record_filter_(thread_tree_),
+        etm_thread_tree_(thread_tree_) {}
 
   bool SetLogSeverity(const char* log_level);
 
@@ -233,11 +263,19 @@ class ReportLib {
 
   const char* GetBuildIdForPath(const char* path);
   FeatureSection* GetFeatureSection(const char* feature_name);
+  BuildIdPair* GetAllBuildIds();
+
+  void SetCallback(UserCallback callback) { callback_ = callback; }
+  DsoAddress ConvertETMAddressToVaddrInFile(uint8_t trace_id, uint64_t address);
+
+  Thread GetThread(int tid);
+  SymbolEntry* ReadSymbolsForPath(const char* path);
 
  private:
   std::unique_ptr<SampleRecord> GetNextSampleRecord();
   void ProcessSampleRecord(std::unique_ptr<Record> r);
   void ProcessSwitchRecord(std::unique_ptr<Record> r);
+  bool ProcessAuxData(std::unique_ptr<Record> r);
   void AddSampleRecordToQueue(SampleRecord* r);
   bool SetCurrentSample(std::unique_ptr<SampleRecord> sample_record);
   void SetEventCounters(const SampleRecord& r);
@@ -271,6 +309,16 @@ class ReportLib {
   ThreadReportBuilder thread_report_builder_;
   std::unique_ptr<Tracing> tracing_;
   RecordFilter record_filter_;
+  std::vector<BuildIdRecord> buildid_records_;
+  std::vector<BuildIdPair> buildids_;
+
+  ETMThreadTreeSimple etm_thread_tree_;
+  std::unique_ptr<ETMDecoder> etm_decoder_;
+  UserCallback callback_;
+  std::vector<uint8_t> aux_data_buffer_;
+  std::string filepath_;
+  std::string comm_;
+  std::vector<SymbolEntry> symbols_;
 };
 
 bool ReportLib::SetLogSeverity(const char* log_level) {
@@ -416,6 +464,21 @@ std::unique_ptr<SampleRecord> ReportLib::GetNextSampleRecord() {
       if (!tracing_) {
         return nullptr;
       }
+    } else if (record->type() == PERF_RECORD_AUXTRACE_INFO) {
+      if (!callback_) {
+        LOG(ERROR) << "ETM trace found but no callback was set!";
+        return nullptr;
+      }
+      etm_decoder_ =
+          ETMDecoder::Create(static_cast<AuxTraceInfoRecord&>(*record), etm_thread_tree_);
+      if (!etm_decoder_) {
+        return nullptr;
+      }
+      etm_decoder_->RegisterCallback(callback_);
+    } else if (record->type() == PERF_RECORD_AUX) {
+      if (!ProcessAuxData(std::move(record))) {
+        return nullptr;
+      }
     }
   }
   std::unique_ptr<SampleRecord> result = std::move(sample_record_queue_.front());
@@ -484,6 +547,29 @@ void ReportLib::ProcessSwitchRecord(std::unique_ptr<Record> r) {
     it->second.release();
     AddSampleRecordToQueue(prev_sr);
   }
+}
+
+bool ReportLib::ProcessAuxData(std::unique_ptr<Record> r) {
+  AuxRecord& aux = static_cast<AuxRecord&>(*r);
+  if (aux.data->aux_size > SIZE_MAX) {
+    LOG(ERROR) << "invalid aux size";
+    return false;
+  }
+  size_t aux_size = aux.data->aux_size;
+  if (aux_size > 0) {
+    bool error = false;
+    if (!record_file_reader_->ReadAuxData(aux.Cpu(), aux.data->aux_offset, aux_size,
+                                          aux_data_buffer_, error)) {
+      return !error;
+    }
+    if (!etm_decoder_) {
+      LOG(ERROR) << "ETMDecoder has not been created";
+      return false;
+    }
+    return etm_decoder_->ProcessData(aux_data_buffer_.data(), aux_size, !aux.Unformatted(),
+                                     aux.Cpu());
+  }
+  return true;
 }
 
 void ReportLib::AddSampleRecordToQueue(SampleRecord* r) {
@@ -654,6 +740,68 @@ FeatureSection* ReportLib::GetFeatureSection(const char* feature_name) {
   return &feature_section_;
 }
 
+BuildIdPair* ReportLib::GetAllBuildIds() {
+  if (!OpenRecordFileIfNecessary()) {
+    return nullptr;
+  }
+  buildid_records_.clear();
+  buildid_records_ = record_file_reader_->ReadBuildIdFeature();
+  if (buildid_records_.empty()) {
+    return nullptr;
+  }
+  buildids_.clear();
+  buildids_.reserve(buildid_records_.size() + 1);
+  for (const auto& r : buildid_records_) {
+    buildids_.emplace_back(r.build_id.Data(), r.filename);
+  }
+  buildids_.emplace_back(nullptr, nullptr);
+  return buildids_.data();
+}
+
+DsoAddress ReportLib::ConvertETMAddressToVaddrInFile(uint8_t trace_id, uint64_t address) {
+  if (!etm_decoder_) {
+    LOG(ERROR) << "ETMDecoder was not created yet!";
+    return DsoAddress{.path = nullptr, .offset = 0};
+  }
+  const simpleperf::MapEntry* e = etm_decoder_->FindMap(trace_id, address);
+  if (e) {
+    filepath_ = e->dso->Path();
+    return DsoAddress{.path = filepath_.c_str(), .offset = e->GetVaddrInFile(address)};
+  } else {
+    return DsoAddress{.path = nullptr, .offset = address};
+  }
+}
+
+Thread ReportLib::GetThread(int tid) {
+  Thread result{.pid = -1, .tid = -1, .comm = nullptr};
+  ThreadEntry* thread = thread_tree_.FindThread(tid);
+  if (thread) {
+    comm_ = thread->comm;
+    result.pid = thread->pid;
+    result.tid = thread->tid;
+    result.comm = comm_.c_str();
+  }
+  return result;
+}
+
+SymbolEntry* ReportLib::ReadSymbolsForPath(const char* path) {
+  std::string filename(path);
+  Dso* dso = thread_tree_.FindUserDso(filename);
+  if (!dso) {
+    return nullptr;
+  }
+  dso->LoadSymbols();
+  auto symbols = dso->GetSymbols();
+
+  symbols_.clear();
+  symbols_.reserve(symbols.size() + 1);
+  for (auto& symbol : symbols) {
+    symbols_.emplace_back(nullptr, 0, symbol.DemangledName(), symbol.addr, symbol.len, nullptr);
+  }
+  symbols_.emplace_back(nullptr, 0, nullptr, 0, 0, nullptr);
+  return symbols_.data();
+}
+
 }  // namespace simpleperf
 
 using ReportLib = simpleperf::ReportLib;
@@ -694,6 +842,13 @@ const char* GetProcessNameOfCurrentSample(ReportLib* report_lib) EXPORT;
 
 const char* GetBuildIdForPath(ReportLib* report_lib, const char* path) EXPORT;
 FeatureSection* GetFeatureSection(ReportLib* report_lib, const char* feature_name) EXPORT;
+BuildIdPair* GetAllBuildIds(ReportLib* report_lib) EXPORT;
+
+void SetETMCallback(ReportLib* report_lib, void (*callback)(const uint8_t, const void*)) EXPORT;
+DsoAddress ConvertETMAddressToVaddrInFile(ReportLib* report_lib, uint8_t trace_id,
+                                          uint64_t address) EXPORT;
+Thread GetThread(ReportLib* report_lib, int tid) EXPORT;
+SymbolEntry* ReadSymbolsForPath(ReportLib* report_lib, const char* path) EXPORT;
 }
 
 // Exported methods working with a client created instance
@@ -792,4 +947,25 @@ const char* GetBuildIdForPath(ReportLib* report_lib, const char* path) {
 
 FeatureSection* GetFeatureSection(ReportLib* report_lib, const char* feature_name) {
   return report_lib->GetFeatureSection(feature_name);
+}
+
+BuildIdPair* GetAllBuildIds(ReportLib* report_lib) {
+  return report_lib->GetAllBuildIds();
+}
+
+void SetETMCallback(ReportLib* report_lib, void (*callback)(const uint8_t, const void*)) {
+  report_lib->SetCallback(callback);
+}
+
+DsoAddress ConvertETMAddressToVaddrInFile(ReportLib* report_lib, uint8_t trace_id,
+                                          uint64_t address) {
+  return report_lib->ConvertETMAddressToVaddrInFile(trace_id, address);
+}
+
+Thread GetThread(ReportLib* report_lib, int tid) {
+  return report_lib->GetThread(tid);
+}
+
+SymbolEntry* ReadSymbolsForPath(ReportLib* report_lib, const char* path) {
+  return report_lib->ReadSymbolsForPath(path);
 }
