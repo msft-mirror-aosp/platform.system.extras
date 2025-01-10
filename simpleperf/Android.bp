@@ -43,6 +43,7 @@ cc_defaults {
         },
         windows: {
             host_ldlibs: [
+                "-lntdll",
                 "-lole32",
                 "-luuid",
             ],
