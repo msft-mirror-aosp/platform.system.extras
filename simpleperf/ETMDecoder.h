@@ -83,6 +83,11 @@ class ETMDecoder {
   using BranchListCallbackFn = std::function<void(const ETMBranchList&)>;
   virtual void RegisterCallback(const BranchListCallbackFn& callback) = 0;
 
+  using UserCallback = std::function<void(const uint8_t, const void*)>;
+  virtual void RegisterCallback(const UserCallback& callback) = 0;
+
+  virtual const MapEntry* FindMap(uint8_t trace_id, uint64_t addr) = 0;
+
   virtual bool ProcessData(const uint8_t* data, size_t size, bool formatted, uint32_t cpu) = 0;
   virtual bool FinishData() = 0;
 };
