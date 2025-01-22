@@ -592,6 +592,12 @@ bool RecordCommand::PrepareRecording(Workload* workload) {
 
   // 3. Process options before opening perf event files.
   exclude_kernel_callchain_ = event_selection_set_.ExcludeKernel();
+#if defined(__ANDROID__)
+  // Enforce removing kernel IP addresses to prevent KASLR disclosure.
+  if (!IsRoot()) {
+    exclude_kernel_callchain_ = true;
+  }
+#endif  // defined(__ANDROID__)
   if (trace_offcpu_ && !TraceOffCpu()) {
     return false;
   }
