@@ -734,7 +734,7 @@ void SampleRecord::ReplaceRegAndStackWithCallChain(const std::vector<uint64_t>& 
 
 bool SampleRecord::ExcludeKernelCallChain() {
   if (!(sample_type & PERF_SAMPLE_CALLCHAIN)) {
-    return true;
+    return false;
   }
   size_t i;
   for (i = 0; i < callchain_data.ip_nr; ++i) {
