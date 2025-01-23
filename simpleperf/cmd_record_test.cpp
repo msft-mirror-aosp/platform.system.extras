@@ -732,7 +732,7 @@ TEST(record_cmd, kernel_bug_making_zero_dyn_size_for_kernel_samples) {
   // kernels. If it fails, please cherry pick below kernel patch:
   // 02e184476eff8 perf/core: Force USER_DS when recording user stack data
   OMIT_TEST_ON_NON_NATIVE_ABIS();
-  TEST_REQUIRE_HOST_ROOT();
+  TEST_REQUIRE_ROOT();
   TEST_REQUIRE_TRACEPOINT_EVENTS();
   std::vector<std::unique_ptr<Workload>> workloads;
   CreateProcesses(1, &workloads);
@@ -859,6 +859,18 @@ static void TestRecordingApps(const std::string& app_name, const std::string& ap
   it = meta_info.find("app_type");
   ASSERT_NE(it, meta_info.end());
   ASSERT_EQ(it->second, app_type);
+
+  // Check that we are not leaking kernel ip addresses.
+  auto process_record = [](std::unique_ptr<Record> r) {
+    if (r->type() == PERF_RECORD_SAMPLE) {
+      const SampleRecord* sr = static_cast<const SampleRecord*>(r.get());
+      if (sr->InKernel()) {
+        return false;
+      }
+    }
+    return true;
+  };
+  ASSERT_TRUE(reader->ReadDataSection(process_record));
   reader.reset(nullptr);
 
   // Check that simpleperf can't execute child command in app uid.
