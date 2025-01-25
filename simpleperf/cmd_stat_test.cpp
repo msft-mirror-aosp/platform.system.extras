@@ -353,14 +353,12 @@ static void TestStatingApps(const std::string& app_name) {
 // @CddTest = 6.1/C-0-2
 TEST(stat_cmd, app_option_for_debuggable_app) {
   TEST_REQUIRE_APPS();
-  SetRunInAppToolForTesting(false, true);
   TestStatingApps("com.android.simpleperf.debuggable");
 }
 
 // @CddTest = 6.1/C-0-2
 TEST(stat_cmd, app_option_for_profileable_app) {
   TEST_REQUIRE_APPS();
-  SetRunInAppToolForTesting(false, true);
   TestStatingApps("com.android.simpleperf.profileable");
 }
 

@@ -899,17 +899,16 @@ static void TestRecordingApps(const std::string& app_name, const std::string& ap
 TEST(record_cmd, app_option_for_debuggable_app) {
   OMIT_TEST_ON_NON_NATIVE_ABIS();
   TEST_REQUIRE_APPS();
+  TestRecordingApps("com.android.simpleperf.debuggable", "debuggable");
   SetRunInAppToolForTesting(true, false);
   TestRecordingApps("com.android.simpleperf.debuggable", "debuggable");
-  SetRunInAppToolForTesting(false, true);
-  TestRecordingApps("com.android.simpleperf.debuggable", "debuggable");
+  SetRunInAppToolForTesting(true, true);
 }
 
 // @CddTest = 6.1/C-0-2
 TEST(record_cmd, app_option_for_profileable_app) {
   OMIT_TEST_ON_NON_NATIVE_ABIS();
   TEST_REQUIRE_APPS();
-  SetRunInAppToolForTesting(false, true);
   TestRecordingApps("com.android.simpleperf.profileable", "profileable");
 }
 
@@ -929,7 +928,6 @@ static void RecordJavaApp(RecordingAppHelper& helper) {
                       "androidx.test.runner.AndroidJUnitRunner"));
 
   // 3. Record perf.data.
-  SetRunInAppToolForTesting(false, true);
   ASSERT_TRUE(helper.RecordData(
       "-e cpu-clock --app com.example.android.displayingbitmaps -g --duration 15"));
 }
@@ -984,7 +982,6 @@ TEST(record_cmd, record_native_app) {
                       "android.intent.action.MAIN -c android.intent.category.LAUNCHER"));
 
   // 3. Record perf.data.
-  SetRunInAppToolForTesting(false, true);
   ASSERT_TRUE(helper.RecordData("-e cpu-clock --app com.google.sample.tunnel -g --duration 10"));
 
   // 4. Check perf.data.
