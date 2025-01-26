@@ -88,9 +88,9 @@ python_test_host {
 }
 
 python_test_host {
-    name: "command_executor_unit_test",
-    main: "tests/command_executor_unit_test.py",
-    srcs: ["tests/command_executor_unit_test.py"],
+    name: "perfetto_command_executor_unit_test",
+    main: "tests/perfetto_command_executor_unit_test.py",
+    srcs: ["tests/perfetto_command_executor_unit_test.py"],
     defaults: ["torq_defaults"],
     version: {
         py3: {
@@ -123,6 +123,22 @@ python_test_host {
     name: "utils_unit_test",
     main: "tests/utils_unit_test.py",
     srcs: ["tests/utils_unit_test.py"],
+    defaults: ["torq_defaults"],
+    version: {
+        py3: {
+            enabled: true,
+            embedded_launcher: false,
+        },
+    },
+    test_options: {
+        unit_test: true,
+    },
+}
+
+python_test_host {
+    name: "open_ui_unit_test",
+    main: "tests/open_ui_unit_test.py",
+    srcs: ["tests/open_ui_unit_test.py"],
     defaults: ["torq_defaults"],
     version: {
         py3: {
