@@ -730,6 +730,12 @@ bool StatCommand::ParseOptions(const std::vector<std::string>& args,
 
   CHECK(options.values.empty());
 
+  bool check_event_type = true;
+  if (!app_package_name_.empty() && !in_app_context_ && !IsRoot()) {
+    // Defer event type checking when RunInAppContext() is called.
+    check_event_type = false;
+  }
+
   // Process ordered options.
   for (const auto& pair : ordered_options) {
     const OptionName& name = pair.first;
@@ -747,7 +753,7 @@ bool StatCommand::ParseOptions(const std::vector<std::string>& args,
         if (!probe_events.CreateProbeEventIfNotExist(event_type)) {
           return false;
         }
-        if (!event_selection_set_.AddEventType(event_type)) {
+        if (!event_selection_set_.AddEventType(event_type, check_event_type)) {
           return false;
         }
       }
@@ -758,7 +764,7 @@ bool StatCommand::ParseOptions(const std::vector<std::string>& args,
           return false;
         }
       }
-      if (!event_selection_set_.AddEventGroup(event_types)) {
+      if (!event_selection_set_.AddEventGroup(event_types, check_event_type)) {
         return false;
       }
     } else if (name == "--tp-filter") {
@@ -799,6 +805,7 @@ std::optional<bool> CheckHardwareCountersOnCpu(int cpu, size_t counters) {
     return std::nullopt;
   }
   perf_event_attr attr = CreateDefaultPerfEventAttr(*event);
+  attr.exclude_kernel = true;
   auto workload = Workload::CreateWorkload({"sleep", "0.1"});
   if (!workload || !workload->SetCpuAffinity(cpu)) {
     return std::nullopt;
@@ -857,11 +864,19 @@ void StatCommand::PrintHardwareCounters() {
 }
 
 bool StatCommand::AddDefaultMeasuredEventTypes() {
-  for (auto& name : default_measured_event_types) {
+  for (std::string name : default_measured_event_types) {
     // It is not an error when some event types in the default list are not
     // supported by the kernel.
     const EventType* type = FindEventTypeByName(name);
-    if (type != nullptr && IsEventAttrSupported(CreateDefaultPerfEventAttr(*type), name)) {
+    perf_event_attr attr = CreateDefaultPerfEventAttr(*type);
+    if (!IsKernelEventSupported()) {
+      attr.exclude_kernel = true;
+      if (name == "cpu-clock" || name == "task-clock") {
+        continue;
+      }
+      name += ":u";
+    }
+    if (type != nullptr && IsEventAttrSupported(attr, name)) {
       if (!event_selection_set_.AddEventType(name)) {
         return false;
       }

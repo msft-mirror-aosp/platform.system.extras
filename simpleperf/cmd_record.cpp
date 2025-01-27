@@ -1250,6 +1250,12 @@ bool RecordCommand::ParseOptions(const std::vector<std::string>& args,
 
   CHECK(options.values.empty());
 
+  bool check_event_type = true;
+  if (!app_package_name_.empty() && !in_app_context_ && !IsRoot()) {
+    // Defer event type checking when RunInAppContext() is called.
+    check_event_type = false;
+  }
+
   // Process ordered options.
   for (const auto& pair : ordered_options) {
     const OptionName& name = pair.first;
@@ -1312,7 +1318,7 @@ bool RecordCommand::ParseOptions(const std::vector<std::string>& args,
         if (!probe_events.CreateProbeEventIfNotExist(event_type)) {
           return false;
         }
-        if (!event_selection_set_.AddEventType(event_type)) {
+        if (!event_selection_set_.AddEventType(event_type, check_event_type)) {
           return false;
         }
       }
@@ -1326,7 +1332,7 @@ bool RecordCommand::ParseOptions(const std::vector<std::string>& args,
           return false;
         }
       }
-      if (!event_selection_set_.AddEventGroup(event_types)) {
+      if (!event_selection_set_.AddEventGroup(event_types, check_event_type)) {
         return false;
       }
     } else if (name == "--tp-filter") {
