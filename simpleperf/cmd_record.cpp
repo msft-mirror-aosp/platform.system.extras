@@ -1996,14 +1996,18 @@ bool RecordCommand::JoinCallChains() {
 
 static void LoadSymbolMapFile(int pid, const std::string& package, ThreadTree* thread_tree) {
   // On Linux, symbol map files usually go to /tmp/perf-<pid>.map
-  // On Android, there is no directory where any process can create files.
-  // For now, use /data/local/tmp/perf-<pid>.map, which works for standalone programs,
-  // and /data/data/<package>/perf-<pid>.map, which works for apps.
-  auto path = package.empty()
-                  ? android::base::StringPrintf("/data/local/tmp/perf-%d.map", pid)
-                  : android::base::StringPrintf("/data/data/%s/perf-%d.map", package.c_str(), pid);
-
-  auto symbols = ReadSymbolMapFromFile(path);
+  // On Android, use /tmp/perf-<pid>.map and /data/local/tmp/perf-<pid>.map, which works for
+  // standalone programs, and /data/data/<package>/perf-<pid>.map, which works for apps.
+  std::vector<Symbol> symbols;
+  std::string filename = android::base::StringPrintf("perf-%d.map", pid);
+  if (package.empty()) {
+    symbols = ReadSymbolMapFromFile("/tmp/" + filename);
+    if (symbols.empty()) {
+      symbols = ReadSymbolMapFromFile("/data/local/tmp/" + filename);
+    }
+  } else {
+    symbols = ReadSymbolMapFromFile("/data/data/" + package + "/" + filename);
+  }
   if (!symbols.empty()) {
     thread_tree->AddSymbolsForProcess(pid, &symbols);
   }
