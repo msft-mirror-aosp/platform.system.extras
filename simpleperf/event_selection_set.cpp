@@ -47,6 +47,7 @@ bool IsBranchSamplingSupported() {
   perf_event_attr attr = CreateDefaultPerfEventAttr(*type);
   attr.sample_type |= PERF_SAMPLE_BRANCH_STACK;
   attr.branch_sample_type = PERF_SAMPLE_BRANCH_ANY;
+  attr.exclude_kernel = true;
   return IsEventAttrSupported(attr, type->name);
 }
 
@@ -62,6 +63,7 @@ bool IsDwarfCallChainSamplingSupported() {
   perf_event_attr attr = CreateDefaultPerfEventAttr(*type);
   attr.sample_type |= PERF_SAMPLE_CALLCHAIN | PERF_SAMPLE_REGS_USER | PERF_SAMPLE_STACK_USER;
   attr.exclude_callchain_user = 1;
+  attr.exclude_kernel = true;
   attr.sample_regs_user = GetSupportedRegMask(GetTargetArch());
   attr.sample_stack_user = 8192;
   return IsEventAttrSupported(attr, type->name);
@@ -161,6 +163,7 @@ bool IsHardwareEventSupported() {
     return false;
   }
   perf_event_attr attr = CreateDefaultPerfEventAttr(*type);
+  attr.exclude_kernel = true;
   return IsEventAttrSupported(attr, type->name);
 }
 
@@ -168,6 +171,15 @@ bool IsSwitchRecordSupported() {
   // Kernel >= 4.3 has patch "45ac1403f perf: Add PERF_RECORD_SWITCH to indicate context switches".
   auto version = GetKernelVersion();
   return version && version.value() >= std::make_pair(4, 3);
+}
+
+bool IsKernelEventSupported() {
+  const EventType* type = FindEventTypeByName("cpu-clock");
+  if (type == nullptr) {
+    return false;
+  }
+  perf_event_attr attr = CreateDefaultPerfEventAttr(*type);
+  return IsEventAttrSupported(attr, type->name);
 }
 
 std::string AddrFilter::ToString() const {
@@ -193,7 +205,7 @@ EventSelectionSet::EventSelectionSet(bool for_stat_cmd)
 EventSelectionSet::~EventSelectionSet() {}
 
 bool EventSelectionSet::BuildAndCheckEventSelection(const std::string& event_name, bool first_event,
-                                                    EventSelection* selection) {
+                                                    EventSelection* selection, bool check) {
   std::unique_ptr<EventTypeAndModifier> event_type = ParseEventType(event_name);
   if (event_type == nullptr) {
     return false;
@@ -256,11 +268,13 @@ bool EventSelectionSet::BuildAndCheckEventSelection(const std::string& event_nam
       }
     }
   }
-  // PMU events are provided by kernel, so they should be supported
-  if (!event_type->event_type.IsPmuEvent() &&
-      !IsEventAttrSupported(selection->event_attr, selection->event_type_modifier.name)) {
-    LOG(ERROR) << "Event type '" << event_type->name << "' is not supported on the device";
-    return false;
+  if (check) {
+    // PMU events are provided by kernel, so they should be supported
+    if (!event_type->event_type.IsPmuEvent() &&
+        !IsEventAttrSupported(selection->event_attr, selection->event_type_modifier.name)) {
+      LOG(ERROR) << "Event type '" << event_type->name << "' is not supported on the device";
+      return false;
+    }
   }
   if (set_default_sample_freq) {
     selection->event_attr.sample_freq = DEFAULT_SAMPLE_FREQ_FOR_NONTRACEPOINT_EVENT;
@@ -279,8 +293,8 @@ bool EventSelectionSet::BuildAndCheckEventSelection(const std::string& event_nam
   return true;
 }
 
-bool EventSelectionSet::AddEventType(const std::string& event_name) {
-  return AddEventGroup(std::vector<std::string>(1, event_name));
+bool EventSelectionSet::AddEventType(const std::string& event_name, bool check) {
+  return AddEventGroup(std::vector<std::string>(1, event_name), check);
 }
 
 bool EventSelectionSet::AddEventType(const std::string& event_name, const SampleRate& sample_rate) {
@@ -291,13 +305,13 @@ bool EventSelectionSet::AddEventType(const std::string& event_name, const Sample
   return true;
 }
 
-bool EventSelectionSet::AddEventGroup(const std::vector<std::string>& event_names) {
+bool EventSelectionSet::AddEventGroup(const std::vector<std::string>& event_names, bool check) {
   EventSelectionGroup group;
   bool first_event = groups_.empty();
   bool first_in_group = true;
   for (const auto& event_name : event_names) {
     EventSelection selection;
-    if (!BuildAndCheckEventSelection(event_name, first_event, &selection)) {
+    if (!BuildAndCheckEventSelection(event_name, first_event, &selection, check)) {
       return false;
     }
     if (IsEtmEventType(selection.event_attr.type)) {
@@ -332,7 +346,7 @@ bool EventSelectionSet::AddCounters(const std::vector<std::string>& event_names)
   }
   for (const auto& event_name : event_names) {
     EventSelection selection;
-    if (!BuildAndCheckEventSelection(event_name, false, &selection)) {
+    if (!BuildAndCheckEventSelection(event_name, false, &selection, true)) {
       return false;
     }
     // Use a big sample_period to avoid getting samples for added counters.

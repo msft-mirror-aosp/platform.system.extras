@@ -58,7 +58,10 @@ static std::unique_ptr<Command> RecordCmd() {
 }
 
 static const char* GetDefaultEvent() {
-  return HasHardwareCounter() ? "cpu-cycles" : "task-clock";
+  if (HasHardwareCounter()) {
+    return IsKernelEventSupported() ? "cpu-cycles" : "cpu-cycles:u";
+  }
+  return IsKernelEventSupported() ? "task-clock" : "task-clock:u";
 }
 
 static bool RunRecordCmd(std::vector<std::string> v, const char* output_file = nullptr) {
@@ -97,7 +100,11 @@ TEST(record_cmd, system_wide_option) {
 
 static void CheckEventType(const std::string& record_file, const std::string& event_type,
                            uint64_t sample_period, uint64_t sample_freq) {
-  const EventType* type = FindEventTypeByName(event_type);
+  std::string event_name = event_type;
+  if (auto pos = event_name.find(":u"); pos != std::string::npos) {
+    event_name = event_name.substr(0, pos);
+  }
+  const EventType* type = FindEventTypeByName(event_name);
   ASSERT_TRUE(type != nullptr);
   std::unique_ptr<RecordFileReader> reader = RecordFileReader::CreateInstance(record_file);
   ASSERT_TRUE(reader);
@@ -126,7 +133,7 @@ TEST(record_cmd, sample_period_option) {
 
 // @CddTest = 6.1/C-0-2
 TEST(record_cmd, event_option) {
-  ASSERT_TRUE(RunRecordCmd({"-e", "cpu-clock"}));
+  ASSERT_TRUE(RunRecordCmd({"-e", "cpu-clock:u"}));
 }
 
 // @CddTest = 6.1/C-0-2
@@ -134,15 +141,15 @@ TEST(record_cmd, freq_option) {
   TemporaryFile tmpfile;
   ASSERT_TRUE(RunRecordCmd({"-f", "99"}, tmpfile.path));
   CheckEventType(tmpfile.path, GetDefaultEvent(), 0, 99u);
-  ASSERT_TRUE(RunRecordCmd({"-e", "cpu-clock", "-f", "99"}, tmpfile.path));
-  CheckEventType(tmpfile.path, "cpu-clock", 0, 99u);
+  ASSERT_TRUE(RunRecordCmd({"-e", "cpu-clock:u", "-f", "99"}, tmpfile.path));
+  CheckEventType(tmpfile.path, "cpu-clock:u", 0, 99u);
   ASSERT_FALSE(RunRecordCmd({"-f", std::to_string(UINT_MAX)}));
 }
 
 // @CddTest = 6.1/C-0-2
 TEST(record_cmd, multiple_freq_or_sample_period_option) {
   TemporaryFile tmpfile;
-  ASSERT_TRUE(RunRecordCmd({"-f", "99", "-e", "task-clock", "-c", "1000000", "-e", "cpu-clock"},
+  ASSERT_TRUE(RunRecordCmd({"-f", "99", "-e", "task-clock:u", "-c", "1000000", "-e", "cpu-clock:u"},
                            tmpfile.path));
   CheckEventType(tmpfile.path, "task-clock", 0, 99u);
   CheckEventType(tmpfile.path, "cpu-clock", 1000000u, 0u);
@@ -156,6 +163,7 @@ TEST(record_cmd, output_file_option) {
 
 // @CddTest = 6.1/C-0-2
 TEST(record_cmd, dump_kernel_mmap) {
+  TEST_REQUIRE_KERNEL_EVENTS();
   TemporaryFile tmpfile;
   ASSERT_TRUE(RunRecordCmd({}, tmpfile.path));
   std::unique_ptr<RecordFileReader> reader = RecordFileReader::CreateInstance(tmpfile.path);
@@ -211,7 +219,7 @@ TEST(record_cmd, rN_event) {
     GTEST_LOG_(INFO) << "Omit arch " << GetTargetArch();
     return;
   }
-  std::string event_name = android::base::StringPrintf("r%zx", event_number);
+  std::string event_name = android::base::StringPrintf("r%zx:u", event_number);
   TemporaryFile tmpfile;
   ASSERT_TRUE(RunRecordCmd({"-e", event_name}, tmpfile.path));
   std::unique_ptr<RecordFileReader> reader = RecordFileReader::CreateInstance(tmpfile.path);
@@ -239,7 +247,11 @@ TEST(record_cmd, branch_sampling) {
 
 // @CddTest = 6.1/C-0-2
 TEST(record_cmd, event_modifier) {
-  ASSERT_TRUE(RunRecordCmd({"-e", GetDefaultEvent() + std::string(":u")}));
+  std::string event_name = GetDefaultEvent();
+  if (event_name.find(':') == std::string::npos) {
+    event_name += ":u";
+  }
+  ASSERT_TRUE(RunRecordCmd({"-e", event_name}));
 }
 
 // @CddTest = 6.1/C-0-2
@@ -340,8 +352,8 @@ TEST(record_cmd, no_monitored_threads) {
 
 // @CddTest = 6.1/C-0-2
 TEST(record_cmd, more_than_one_event_types) {
-  ASSERT_TRUE(RunRecordCmd({"-e", "task-clock,cpu-clock"}));
-  ASSERT_TRUE(RunRecordCmd({"-e", "task-clock", "-e", "cpu-clock"}));
+  ASSERT_TRUE(RunRecordCmd({"-e", "task-clock:u,cpu-clock:u"}));
+  ASSERT_TRUE(RunRecordCmd({"-e", "task-clock:u", "-e", "cpu-clock:u"}));
 }
 
 // @CddTest = 6.1/C-0-2
@@ -451,10 +463,12 @@ TEST(record_cmd, dump_kernel_symbols) {
 
 // @CddTest = 6.1/C-0-2
 TEST(record_cmd, group_option) {
-  ASSERT_TRUE(RunRecordCmd({"--group", "task-clock,cpu-clock", "-m", "16"}));
-  ASSERT_TRUE(
-      RunRecordCmd({"--group", "task-clock,cpu-clock", "--group", "task-clock:u,cpu-clock:u",
-                    "--group", "task-clock:k,cpu-clock:k", "-m", "16"}));
+  ASSERT_TRUE(RunRecordCmd({"--group", "task-clock:u,cpu-clock:u", "-m", "16"}));
+  if (IsRoot()) {
+    ASSERT_TRUE(
+        RunRecordCmd({"--group", "task-clock,cpu-clock", "--group", "task-clock:u,cpu-clock:u",
+                      "--group", "task-clock:k,cpu-clock:k", "-m", "16"}));
+  }
 }
 
 // @CddTest = 6.1/C-0-2
@@ -473,6 +487,7 @@ TEST(record_cmd, duration_option) {
 
 // @CddTest = 6.1/C-0-2
 TEST(record_cmd, support_modifier_for_clock_events) {
+  TEST_REQUIRE_KERNEL_EVENTS();
   for (const std::string& e : {"cpu-clock", "task-clock"}) {
     for (const std::string& m : {"u", "k"}) {
       ASSERT_TRUE(RunRecordCmd({"-e", e + ":" + m})) << "event " << e << ":" << m;
@@ -571,7 +586,7 @@ TEST(record_cmd, cpu_clock_for_a_long_time) {
   std::string pid = std::to_string(workloads[0]->GetPid());
   TemporaryFile tmpfile;
   ASSERT_TRUE(
-      RecordCmd()->Run({"-e", "cpu-clock", "-o", tmpfile.path, "-p", pid, "--duration", "3"}));
+      RecordCmd()->Run({"-e", "cpu-clock:u", "-o", tmpfile.path, "-p", pid, "--duration", "3"}));
 }
 
 // @CddTest = 6.1/C-0-2
@@ -587,6 +602,7 @@ TEST(record_cmd, dump_regs_for_tracepoint_events) {
 
 // @CddTest = 6.1/C-0-2
 TEST(record_cmd, trace_offcpu_option) {
+  TEST_REQUIRE_KERNEL_EVENTS();
   // On linux host, we need root privilege to read tracepoint events.
   TEST_REQUIRE_HOST_ROOT();
   TEST_REQUIRE_TRACEPOINT_EVENTS();
@@ -646,7 +662,7 @@ TEST(record_cmd, clockid_option) {
 // @CddTest = 6.1/C-0-2
 TEST(record_cmd, generate_samples_by_hw_counters) {
   TEST_REQUIRE_HW_COUNTER();
-  std::vector<std::string> events = {"cpu-cycles", "instructions"};
+  std::vector<std::string> events = {"cpu-cycles:u", "instructions:u"};
   for (auto& event : events) {
     TemporaryFile tmpfile;
     ASSERT_TRUE(RecordCmd()->Run({"-e", event, "-o", tmpfile.path, "sleep", "1"}));
@@ -883,17 +899,16 @@ static void TestRecordingApps(const std::string& app_name, const std::string& ap
 TEST(record_cmd, app_option_for_debuggable_app) {
   OMIT_TEST_ON_NON_NATIVE_ABIS();
   TEST_REQUIRE_APPS();
+  TestRecordingApps("com.android.simpleperf.debuggable", "debuggable");
   SetRunInAppToolForTesting(true, false);
   TestRecordingApps("com.android.simpleperf.debuggable", "debuggable");
-  SetRunInAppToolForTesting(false, true);
-  TestRecordingApps("com.android.simpleperf.debuggable", "debuggable");
+  SetRunInAppToolForTesting(true, true);
 }
 
 // @CddTest = 6.1/C-0-2
 TEST(record_cmd, app_option_for_profileable_app) {
   OMIT_TEST_ON_NON_NATIVE_ABIS();
   TEST_REQUIRE_APPS();
-  SetRunInAppToolForTesting(false, true);
   TestRecordingApps("com.android.simpleperf.profileable", "profileable");
 }
 
@@ -913,7 +928,6 @@ static void RecordJavaApp(RecordingAppHelper& helper) {
                       "androidx.test.runner.AndroidJUnitRunner"));
 
   // 3. Record perf.data.
-  SetRunInAppToolForTesting(true, true);
   ASSERT_TRUE(helper.RecordData(
       "-e cpu-clock --app com.example.android.displayingbitmaps -g --duration 15"));
 }
@@ -968,7 +982,6 @@ TEST(record_cmd, record_native_app) {
                       "android.intent.action.MAIN -c android.intent.category.LAUNCHER"));
 
   // 3. Record perf.data.
-  SetRunInAppToolForTesting(true, true);
   ASSERT_TRUE(helper.RecordData("-e cpu-clock --app com.google.sample.tunnel -g --duration 10"));
 
   // 4. Check perf.data.
@@ -1291,7 +1304,7 @@ TEST(record_cmd, exclude_perf_option) {
 
 // @CddTest = 6.1/C-0-2
 TEST(record_cmd, tp_filter_option) {
-  TEST_REQUIRE_HOST_ROOT();
+  TEST_REQUIRE_KERNEL_EVENTS();
   TEST_REQUIRE_TRACEPOINT_EVENTS();
   // Test string operands both with quotes and without quotes.
   for (const auto& filter :
@@ -1380,6 +1393,7 @@ TEST(record_cmd, keep_failed_unwinding_result_option) {
 
 // @CddTest = 6.1/C-0-2
 TEST(record_cmd, kernel_address_warning) {
+  TEST_REQUIRE_KERNEL_EVENTS();
   TEST_REQUIRE_NON_ROOT();
   const std::string warning_msg = "Access to kernel symbol addresses is restricted.";
   CapturedStderr capture;
@@ -1449,8 +1463,8 @@ TEST(record_cmd, device_meta_info) {
 TEST(record_cmd, add_counter_option) {
   TEST_REQUIRE_HW_COUNTER();
   TemporaryFile tmpfile;
-  ASSERT_TRUE(RecordCmd()->Run({"-e", "cpu-cycles", "--add-counter", "instructions", "--no-inherit",
-                                "-o", tmpfile.path, "sleep", "1"}));
+  ASSERT_TRUE(RecordCmd()->Run({"-e", "cpu-cycles:u", "--add-counter", "instructions:u",
+                                "--no-inherit", "-o", tmpfile.path, "sleep", "1"}));
   std::unique_ptr<RecordFileReader> reader = RecordFileReader::CreateInstance(tmpfile.path);
   ASSERT_TRUE(reader);
   bool has_sample = false;
