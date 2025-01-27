@@ -715,7 +715,8 @@ TEST_F(ReportCommandTest, dwarf_callgraph) {
   CreateProcesses(1, &workloads);
   std::string pid = std::to_string(workloads[0]->GetPid());
   TemporaryFile tmp_file;
-  ASSERT_TRUE(RecordCmd()->Run({"-p", pid, "-g", "-o", tmp_file.path, "sleep", SLEEP_SEC}));
+  ASSERT_TRUE(RecordCmd()->Run(
+      {"-p", pid, "-g", "-o", tmp_file.path, "-e", "cpu-cycles:u", "sleep", SLEEP_SEC}));
   ReportRaw(tmp_file.path, {"-g"});
   ASSERT_TRUE(success);
 }
@@ -731,6 +732,7 @@ TEST_F(ReportCommandTest, report_dwarf_callgraph_of_nativelib_in_apk) {
 
 // @CddTest = 6.1/C-0-2
 TEST_F(ReportCommandTest, exclude_kernel_callchain) {
+  TEST_REQUIRE_KERNEL_EVENTS();
   TEST_REQUIRE_HW_COUNTER();
   TEST_REQUIRE_HOST_ROOT();
   OMIT_TEST_ON_NON_NATIVE_ABIS();

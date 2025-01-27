@@ -48,13 +48,13 @@ TEST(EventSelectionSet, set_sample_rate_for_new_events) {
 TEST(EventSelectionSet, add_event_with_sample_rate) {
   EventSelectionSet event_selection_set(false);
   ASSERT_TRUE(event_selection_set.AddEventType("cpu-clock:u"));
-  ASSERT_TRUE(event_selection_set.AddEventType("context-switches", SampleRate(0, 1)));
+  ASSERT_TRUE(event_selection_set.AddEventType("context-switches:u", SampleRate(0, 1)));
   EventAttrIds attrs = event_selection_set.GetEventAttrWithId();
   ASSERT_EQ(attrs.size(), 2);
   ASSERT_EQ(GetEventNameByAttr(attrs[0].attr), "cpu-clock:u");
   ASSERT_EQ(attrs[0].attr.freq, 1);
   ASSERT_EQ(attrs[0].attr.sample_freq, 4000);
-  ASSERT_EQ(GetEventNameByAttr(attrs[1].attr), "context-switches");
+  ASSERT_EQ(GetEventNameByAttr(attrs[1].attr), "context-switches:u");
   ASSERT_EQ(attrs[1].attr.freq, 0);
   ASSERT_EQ(attrs[1].attr.sample_period, 1);
 }
