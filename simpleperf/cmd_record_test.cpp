@@ -876,17 +876,19 @@ static void TestRecordingApps(const std::string& app_name, const std::string& ap
   ASSERT_NE(it, meta_info.end());
   ASSERT_EQ(it->second, app_type);
 
-  // Check that we are not leaking kernel ip addresses.
-  auto process_record = [](std::unique_ptr<Record> r) {
-    if (r->type() == PERF_RECORD_SAMPLE) {
-      const SampleRecord* sr = static_cast<const SampleRecord*>(r.get());
-      if (sr->InKernel()) {
-        return false;
+  if (!IsRoot()) {
+    // Check that we are not leaking kernel ip addresses.
+    auto process_record = [](std::unique_ptr<Record> r) {
+      if (r->type() == PERF_RECORD_SAMPLE) {
+        const SampleRecord* sr = static_cast<const SampleRecord*>(r.get());
+        if (sr->InKernel()) {
+          return false;
+        }
       }
-    }
-    return true;
-  };
-  ASSERT_TRUE(reader->ReadDataSection(process_record));
+      return true;
+    };
+    ASSERT_TRUE(reader->ReadDataSection(process_record));
+  }
   reader.reset(nullptr);
 
   // Check that simpleperf can't execute child command in app uid.
