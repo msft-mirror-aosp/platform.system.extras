@@ -868,6 +868,9 @@ bool StatCommand::AddDefaultMeasuredEventTypes() {
     // It is not an error when some event types in the default list are not
     // supported by the kernel.
     const EventType* type = FindEventTypeByName(name);
+    if (type == nullptr) {
+      continue;
+    }
     perf_event_attr attr = CreateDefaultPerfEventAttr(*type);
     if (!IsKernelEventSupported()) {
       attr.exclude_kernel = true;
@@ -876,7 +879,7 @@ bool StatCommand::AddDefaultMeasuredEventTypes() {
       }
       name += ":u";
     }
-    if (type != nullptr && IsEventAttrSupported(attr, name)) {
+    if (IsEventAttrSupported(attr, name)) {
       if (!event_selection_set_.AddEventType(name)) {
         return false;
       }
