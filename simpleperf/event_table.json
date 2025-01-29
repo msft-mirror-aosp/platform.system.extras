@@ -1045,7 +1045,7 @@
   },
   "x86-intel": {
     "events": [
-      ["0x20c4", "BR_INST_RETIRED.NEAR_TAKEN", "Taken branch instructions retired", "atom=0xc0c4"]
+      ["0xc0c4", "BR_INST_RETIRED.NEAR_TAKEN", "Taken branch instructions retired", "atom=0x20c4"]
     ]
   },
   "x86-amd": {
