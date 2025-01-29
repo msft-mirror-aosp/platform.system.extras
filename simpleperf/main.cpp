@@ -16,6 +16,7 @@
 
 #if defined(__ANDROID__)
 #include <android-base/properties.h>
+#include <sys/prctl.h>
 #endif
 
 #include "command.h"
@@ -75,6 +76,8 @@ int main(int argc, char** argv) {
   if (!AndroidSecurityCheck()) {
     return 1;
   }
+  // Disable core dump to avoid leaking raw sample info.
+  prctl(PR_SET_DUMPABLE, 0);
 #endif
   RegisterAllCommands();
   return RunSimpleperfCmd(argc, argv) ? 0 : 1;
