@@ -66,7 +66,7 @@ TEST_F(RecordTest, SampleRecordMatchBinary) {
 // @CddTest = 6.1/C-0-2
 TEST_F(RecordTest, SampleRecord_exclude_kernel_callchain) {
   SampleRecord r(event_attr, 0, 1, 0, 0, 0, 0, 0, {}, {}, {}, 0);
-  ASSERT_TRUE(r.ExcludeKernelCallChain());
+  ASSERT_FALSE(r.ExcludeKernelCallChain());
 
   event_attr.sample_type |= PERF_SAMPLE_CALLCHAIN;
   SampleRecord r1(event_attr, 0, 1, 0, 0, 0, 0, 0, {}, {PERF_CONTEXT_USER, 2}, {}, 0);

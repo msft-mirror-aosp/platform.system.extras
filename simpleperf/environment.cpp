@@ -815,19 +815,18 @@ bool RunInAppContext(const std::string& app_package_name, const std::string& cmd
   if (app_type == "unknown" && IsAppDebuggable(user_id, app_package_name)) {
     app_type = "debuggable";
   }
-
-  if (allow_run_as && app_type == "debuggable") {
-    in_app_runner.reset(new RunAs(user_id, app_package_name));
-    if (!in_app_runner->Prepare()) {
-      in_app_runner = nullptr;
-    }
-  }
-  if (!in_app_runner && allow_simpleperf_app_runner) {
+  if (allow_simpleperf_app_runner) {
     if (app_type == "debuggable" || app_type == "profileable" || app_type == "unknown") {
       in_app_runner.reset(new SimpleperfAppRunner(user_id, app_package_name, app_type));
       if (!in_app_runner->Prepare()) {
         in_app_runner = nullptr;
       }
+    }
+  }
+  if (!in_app_runner && allow_run_as && app_type == "debuggable") {
+    in_app_runner.reset(new RunAs(user_id, app_package_name));
+    if (!in_app_runner->Prepare()) {
+      in_app_runner = nullptr;
     }
   }
   if (!in_app_runner) {

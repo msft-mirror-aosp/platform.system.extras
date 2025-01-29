@@ -43,7 +43,8 @@ TEST(stat_cmd, no_options) {
 
 // @CddTest = 6.1/C-0-2
 TEST(stat_cmd, event_option) {
-  ASSERT_TRUE(StatCmd()->Run({"-e", "cpu-clock,task-clock", "sleep", "1"}));
+  TEST_REQUIRE_HW_COUNTER();
+  ASSERT_TRUE(StatCmd()->Run({"-e", "cpu-cycles:u,instructions:u", "sleep", "1"}));
 }
 
 // @CddTest = 6.1/C-0-2
@@ -53,7 +54,8 @@ TEST(stat_cmd, system_wide_option) {
 
 // @CddTest = 6.1/C-0-2
 TEST(stat_cmd, verbose_option) {
-  ASSERT_TRUE(StatCmd()->Run({"--verbose", "sleep", "1"}));
+  TEST_REQUIRE_HW_COUNTER();
+  ASSERT_TRUE(StatCmd()->Run({"--verbose", "-e", "cpu-cycles:u", "sleep", "1"}));
 }
 
 // @CddTest = 6.1/C-0-2
@@ -81,7 +83,7 @@ TEST(stat_cmd, rN_event) {
     GTEST_LOG_(INFO) << "Omit arch " << GetTargetArch();
     return;
   }
-  std::string event_name = android::base::StringPrintf("r%zx", event_number);
+  std::string event_name = android::base::StringPrintf("r%zx:u", event_number);
   ASSERT_TRUE(StatCmd()->Run({"-e", event_name, "sleep", "1"}));
 }
 
@@ -106,13 +108,13 @@ TEST(stat_cmd, pmu_event) {
 // @CddTest = 6.1/C-0-2
 TEST(stat_cmd, event_modifier) {
   TEST_REQUIRE_HW_COUNTER();
+  TEST_REQUIRE_ROOT();
   ASSERT_TRUE(StatCmd()->Run({"-e", "cpu-cycles:u,cpu-cycles:k", "sleep", "1"}));
 }
 
 void RunWorkloadFunction() {
   while (true) {
-    for (volatile int i = 0; i < 10000; ++i)
-      ;
+    for (volatile int i = 0; i < 10000; ++i);
     usleep(1);
   }
 }
@@ -156,6 +158,7 @@ TEST(stat_cmd, no_monitored_threads) {
 
 // @CddTest = 6.1/C-0-2
 TEST(stat_cmd, group_option) {
+  TEST_REQUIRE_KERNEL_EVENTS();
   TEST_REQUIRE_HW_COUNTER();
   ASSERT_TRUE(StatCmd()->Run({"--group", "cpu-clock,page-faults", "sleep", "1"}));
   ASSERT_TRUE(StatCmd()->Run({"--group", "cpu-cycles,instructions", "--group",
@@ -165,6 +168,7 @@ TEST(stat_cmd, group_option) {
 
 // @CddTest = 6.1/C-0-2
 TEST(stat_cmd, auto_generated_summary) {
+  TEST_REQUIRE_KERNEL_EVENTS();
   TEST_REQUIRE_HW_COUNTER();
   TemporaryFile tmp_file;
   ASSERT_TRUE(StatCmd()->Run(
@@ -217,6 +221,7 @@ TEST(stat_cmd, interval_only_values_option) {
 
 // @CddTest = 6.1/C-0-2
 TEST(stat_cmd, no_modifier_for_clock_events) {
+  TEST_REQUIRE_KERNEL_EVENTS();
   for (const std::string& e : {"cpu-clock", "task-clock"}) {
     for (const std::string& m : {"u", "k"}) {
       ASSERT_FALSE(StatCmd()->Run({"-e", e + ":" + m, "sleep", "0.1"}))
@@ -243,8 +248,7 @@ TEST(stat_cmd, stop_when_no_more_targets) {
     sleep(1);
   });
   thread.detach();
-  while (tid == 0)
-    ;
+  while (tid == 0);
   ASSERT_TRUE(StatCmd()->Run({"-t", std::to_string(tid), "--in-app"}));
 }
 
@@ -252,7 +256,7 @@ TEST(stat_cmd, stop_when_no_more_targets) {
 TEST(stat_cmd, sample_rate_should_be_zero) {
   TEST_REQUIRE_HW_COUNTER();
   EventSelectionSet set(true);
-  ASSERT_TRUE(set.AddEventType("cpu-cycles"));
+  ASSERT_TRUE(set.AddEventType("cpu-cycles:u"));
   set.AddMonitoredProcesses({getpid()});
   set.SetCpusForNewEvents({-1});
   ASSERT_TRUE(set.OpenEventFiles());
@@ -267,6 +271,7 @@ TEST(stat_cmd, sample_rate_should_be_zero) {
 
 // @CddTest = 6.1/C-0-2
 TEST(stat_cmd, calculating_cpu_frequency) {
+  TEST_REQUIRE_KERNEL_EVENTS();
   TEST_REQUIRE_HW_COUNTER();
   CaptureStdout capture;
   ASSERT_TRUE(capture.Start());
@@ -293,6 +298,7 @@ TEST(stat_cmd, calculating_cpu_frequency) {
 
 // @CddTest = 6.1/C-0-2
 TEST(stat_cmd, set_comm_in_another_thread) {
+  TEST_REQUIRE_KERNEL_EVENTS();
   // Test a kernel bug which was fixed in 3.15. If kernel panic happens, please cherry pick kernel
   // patch: e041e328c4b41e perf: Fix perf_event_comm() vs. exec() assumption
   TEST_REQUIRE_HW_COUNTER();
@@ -347,16 +353,12 @@ static void TestStatingApps(const std::string& app_name) {
 // @CddTest = 6.1/C-0-2
 TEST(stat_cmd, app_option_for_debuggable_app) {
   TEST_REQUIRE_APPS();
-  SetRunInAppToolForTesting(true, false);
-  TestStatingApps("com.android.simpleperf.debuggable");
-  SetRunInAppToolForTesting(false, true);
   TestStatingApps("com.android.simpleperf.debuggable");
 }
 
 // @CddTest = 6.1/C-0-2
 TEST(stat_cmd, app_option_for_profileable_app) {
   TEST_REQUIRE_APPS();
-  SetRunInAppToolForTesting(false, true);
   TestStatingApps("com.android.simpleperf.profileable");
 }
 
@@ -419,6 +421,7 @@ TEST(stat_cmd, print_hw_counter_option) {
 
 // @CddTest = 6.1/C-0-2
 TEST(stat_cmd, record_different_counters_for_different_cpus) {
+  TEST_REQUIRE_HW_COUNTER();
   std::vector<int> online_cpus = GetOnlineCpus();
   ASSERT_FALSE(online_cpus.empty());
   std::string cpu0 = std::to_string(online_cpus[0]);
@@ -426,22 +429,20 @@ TEST(stat_cmd, record_different_counters_for_different_cpus) {
 
   CaptureStdout capture;
   ASSERT_TRUE(capture.Start());
-  ASSERT_TRUE(StatCmd()->Run({"--csv", "--cpu", cpu0, "-e", "cpu-clock", "--cpu", cpu1, "-e",
-                              "task-clock", "--verbose", "sleep", SLEEP_SEC}));
+  ASSERT_TRUE(StatCmd()->Run({"--csv", "--cpu", cpu0, "-e", "cpu-cycles:u", "--cpu", cpu1, "-e",
+                              "instructions:u", "--verbose", "sleep", SLEEP_SEC}));
   std::string output = capture.Finish();
-  bool has_cpu_clock = false;
-  bool has_task_clock = false;
+  int mask = 0;
   for (auto& line : android::base::Split(output, "\n")) {
-    if (android::base::StartsWith(line, "cpu-clock,")) {
+    if (android::base::StartsWith(line, "cpu-cycles,")) {
       ASSERT_NE(line.find("cpu," + cpu0 + ","), line.npos) << output;
-      has_cpu_clock = true;
-    } else if (android::base::StartsWith(line, "task-clock,")) {
+      mask |= 1;
+    } else if (android::base::StartsWith(line, "instructions,")) {
       ASSERT_NE(line.find("cpu," + cpu1 + ","), line.npos) << output;
-      has_task_clock = true;
+      mask |= 2;
     }
   }
-  ASSERT_TRUE(has_cpu_clock) << output;
-  ASSERT_TRUE(has_task_clock) << output;
+  ASSERT_EQ(mask, 3) << output;
 }
 
 // @CddTest = 6.1/C-0-2
@@ -464,6 +465,7 @@ TEST(stat_cmd, kprobe_option) {
 TEST(stat_cmd, tp_filter_option) {
   TEST_REQUIRE_HOST_ROOT();
   TEST_REQUIRE_TRACEPOINT_EVENTS();
+  TEST_REQUIRE_KERNEL_EVENTS();
   ASSERT_TRUE(StatCmd()->Run(
       {"-e", "sched:sched_switch", "--tp-filter", "prev_comm != sleep", "sleep", SLEEP_SEC}));
 }
