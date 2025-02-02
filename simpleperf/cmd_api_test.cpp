@@ -75,7 +75,6 @@ static void RecordApp(const std::string& package_name, const std::string& apk_pa
   ASSERT_TRUE(WaitUntilAppExit(package_name));
 
   // 5. Collect perf.data.
-  SetRunInAppToolForTesting(true, true);
   TemporaryFile tmpfile;
   ASSERT_TRUE(
       CreateCommandInstance("api-collect")->Run({"--app", package_name, "-o", tmpfile.path}));

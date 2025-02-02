@@ -592,6 +592,12 @@ bool RecordCommand::PrepareRecording(Workload* workload) {
 
   // 3. Process options before opening perf event files.
   exclude_kernel_callchain_ = event_selection_set_.ExcludeKernel();
+#if defined(__ANDROID__)
+  // Enforce removing kernel IP addresses to prevent KASLR disclosure.
+  if (!IsRoot()) {
+    exclude_kernel_callchain_ = true;
+  }
+#endif  // defined(__ANDROID__)
   if (trace_offcpu_ && !TraceOffCpu()) {
     return false;
   }
@@ -1244,6 +1250,12 @@ bool RecordCommand::ParseOptions(const std::vector<std::string>& args,
 
   CHECK(options.values.empty());
 
+  bool check_event_type = true;
+  if (!app_package_name_.empty() && !in_app_context_ && !IsRoot()) {
+    // Defer event type checking when RunInAppContext() is called.
+    check_event_type = false;
+  }
+
   // Process ordered options.
   for (const auto& pair : ordered_options) {
     const OptionName& name = pair.first;
@@ -1306,7 +1318,7 @@ bool RecordCommand::ParseOptions(const std::vector<std::string>& args,
         if (!probe_events.CreateProbeEventIfNotExist(event_type)) {
           return false;
         }
-        if (!event_selection_set_.AddEventType(event_type)) {
+        if (!event_selection_set_.AddEventType(event_type, check_event_type)) {
           return false;
         }
       }
@@ -1320,7 +1332,7 @@ bool RecordCommand::ParseOptions(const std::vector<std::string>& args,
           return false;
         }
       }
-      if (!event_selection_set_.AddEventGroup(event_types)) {
+      if (!event_selection_set_.AddEventGroup(event_types, check_event_type)) {
         return false;
       }
     } else if (name == "--tp-filter") {
@@ -1984,14 +1996,18 @@ bool RecordCommand::JoinCallChains() {
 
 static void LoadSymbolMapFile(int pid, const std::string& package, ThreadTree* thread_tree) {
   // On Linux, symbol map files usually go to /tmp/perf-<pid>.map
-  // On Android, there is no directory where any process can create files.
-  // For now, use /data/local/tmp/perf-<pid>.map, which works for standalone programs,
-  // and /data/data/<package>/perf-<pid>.map, which works for apps.
-  auto path = package.empty()
-                  ? android::base::StringPrintf("/data/local/tmp/perf-%d.map", pid)
-                  : android::base::StringPrintf("/data/data/%s/perf-%d.map", package.c_str(), pid);
-
-  auto symbols = ReadSymbolMapFromFile(path);
+  // On Android, use /tmp/perf-<pid>.map and /data/local/tmp/perf-<pid>.map, which works for
+  // standalone programs, and /data/data/<package>/perf-<pid>.map, which works for apps.
+  std::vector<Symbol> symbols;
+  std::string filename = android::base::StringPrintf("perf-%d.map", pid);
+  if (package.empty()) {
+    symbols = ReadSymbolMapFromFile("/tmp/" + filename);
+    if (symbols.empty()) {
+      symbols = ReadSymbolMapFromFile("/data/local/tmp/" + filename);
+    }
+  } else {
+    symbols = ReadSymbolMapFromFile("/data/data/" + package + "/" + filename);
+  }
   if (!symbols.empty()) {
     thread_tree->AddSymbolsForProcess(pid, &symbols);
   }
