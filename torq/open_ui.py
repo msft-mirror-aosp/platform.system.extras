@@ -22,7 +22,7 @@ import http.server
 import os
 import subprocess
 from handle_input import HandleInput
-from utils import path_exists
+from utils import path_exists, wait_for_process_or_ctrl_c, wait_for_output
 from validation_error import ValidationError
 
 TORQ_TEMP_DIR = "/tmp/.torq"
@@ -31,6 +31,7 @@ TORQ_TEMP_TRACE_PROCESSOR = TORQ_TEMP_DIR + TRACE_PROCESSOR_BINARY
 ANDROID_PERFETTO_TOOLS_DIR = "/external/perfetto/tools"
 ANDROID_TRACE_PROCESSOR = ANDROID_PERFETTO_TOOLS_DIR + TRACE_PROCESSOR_BINARY
 LARGE_FILE_SIZE = 1024 * 1024 * 512  # 512 MB
+WAIT_FOR_TRACE_PROCESSOR_MS = 3000
 
 
 class HttpHandler(http.server.SimpleHTTPRequestHandler):
@@ -98,11 +99,21 @@ def open_trace(path, origin, use_trace_processor):
     if isinstance(trace_processor_path, ValidationError):
       return trace_processor_path
     if trace_processor_path is not None:
+      process = subprocess.Popen("%s --httpd %s" % (trace_processor_path, path),
+                                 shell=True, stdout=subprocess.PIPE,
+                                 stderr=subprocess.STDOUT)
+      print("\033[93m##### Loading trace. #####")
+      if wait_for_output("Trace loaded", process,
+                         WAIT_FOR_TRACE_PROCESSOR_MS):
+        process.kill()
+        return ValidationError("Trace took too long to load.",
+                               "Please try again.")
       webbrowser.open_new_tab(origin)
-      print("Refresh the Perfetto UI once the trace is loaded and follow the "
-            "directions. Do not exit out of torq until you are done viewing "
-            "the trace.")
-      subprocess.run("%s --httpd %s" % (trace_processor_path, path), shell=True)
+      print("##### Follow the directions in the Perfetto UI. Do not "
+            "exit out of torq until you are done viewing the trace. Press "
+            "CTRL+C to exit torq and close the trace_processor. #####\033[0m")
+      wait_for_process_or_ctrl_c(process)
+
   else: # Open trace directly in UI
     os.chdir(os.path.dirname(path))
     fname = os.path.basename(path)
