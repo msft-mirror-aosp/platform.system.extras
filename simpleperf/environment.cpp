@@ -1193,4 +1193,17 @@ std::set<int> GetX86IntelAtomCpus() {
   return atom_cpus.has_value() ? atom_cpus.value() : std::set<int>();
 }
 
+std::optional<uint32_t> GetX86IntelAtomCpuEventType() {
+  std::string data;
+  if (!android::base::ReadFileToString("/sys/bus/event_source/devices/cpu_atom/type", &data)) {
+    return std::nullopt;
+  }
+  data = android::base::Trim(data);
+  uint32_t result;
+  if (android::base::ParseUint(data, &result)) {
+    return result;
+  }
+  return std::nullopt;
+}
+
 }  // namespace simpleperf
