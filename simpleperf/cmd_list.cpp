@@ -225,6 +225,7 @@ class RawEventSupportChecker {
       std::this_thread::sleep_for(std::chrono::milliseconds(1));
     }
     perf_event_attr attr = CreateDefaultPerfEventAttr(event_type);
+    attr.exclude_kernel = 1;
 #if defined(__i386__) || defined(__x86_64__)
     std::set<int> atom_cpus = GetX86IntelAtomCpus();
     if (atom_cpus.count(cpu) > 0) {

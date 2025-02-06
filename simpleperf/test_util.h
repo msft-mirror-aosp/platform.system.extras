@@ -108,6 +108,14 @@ bool HasTracepointEvents();
     }                                                                                         \
   } while (0)
 
+#define TEST_REQUIRE_KERNEL_EVENTS()                                                           \
+  do {                                                                                         \
+    if (!IsKernelEventSupported()) {                                                           \
+      GTEST_LOG_(INFO) << "Skip this test as the test environment can't count kernel events."; \
+      return;                                                                                  \
+    }                                                                                          \
+  } while (0)
+
 #if defined(IN_CTS_TEST)
 #define TEST_REQUIRE_APPS()
 #else

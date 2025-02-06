@@ -513,6 +513,25 @@ class InstrRangeParser : public ElementCallback {
   ETMDecoder::InstrRangeCallbackFn callback_;
 };
 
+class UserElementCallback : public ElementCallback {
+ public:
+  UserElementCallback(MapLocator& map_locator, const ETMDecoder::UserCallback& callback)
+      : map_locator_(map_locator), callback_(callback) {}
+
+  ocsd_datapath_resp_t ProcessElement(const ocsd_trc_index_t, uint8_t trace_id,
+                                      const OcsdTraceElement& elem,
+                                      const ocsd_instr_info*) override {
+    // Make sure it is a pointer to the struct, to make it accessible through a C API.
+    const ocsd_generic_trace_elem* ptr = &elem;
+    callback_(trace_id, ptr);
+    return OCSD_RESP_CONT;
+  }
+
+ private:
+  MapLocator& map_locator_;
+  ETMDecoder::UserCallback callback_;
+};
+
 // It parses ETMBranchLists from ETMV4IPackets.
 // It doesn't do element decoding and instruction decoding, thus is about 5 timers faster than
 // InstrRangeParser. But some data will be lost when converting ETMBranchLists to InstrRanges:
@@ -731,6 +750,20 @@ class ETMDecoderImpl : public ETMDecoder {
     InstallPacketCallback(branch_list_parser_.get());
   }
 
+  void RegisterCallback(const UserCallback& callback) {
+    InstallMapLocator();
+    user_element_callback_.reset(new UserElementCallback(*map_locator_, callback));
+    InstallElementCallback(user_element_callback_.get());
+  }
+
+  const MapEntry* FindMap(uint8_t trace_id, uint64_t addr) {
+    if (!map_locator_) {
+      InstallMapLocator();
+    }
+
+    return map_locator_->FindMap(trace_id, addr);
+  }
+
   bool ProcessData(const uint8_t* data, size_t size, bool formatted, uint32_t cpu) override {
     // Reset decoders before processing each data block. Because:
     // 1. Data blocks are not continuous. So decoders shouldn't keep previous states when
@@ -826,6 +859,7 @@ class ETMDecoderImpl : public ETMDecoder {
   std::unique_ptr<InstrRangeParser> instr_range_parser_;
   std::unique_ptr<MapLocator> map_locator_;
   std::unique_ptr<BranchListParser> branch_list_parser_;
+  std::unique_ptr<UserElementCallback> user_element_callback_;
 };
 
 }  // namespace
