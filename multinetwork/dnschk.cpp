@@ -37,6 +37,7 @@ int main(int argc, const char* argv[]) {
     if (!args.parseArguments(argc, argv)) { return rval; }
 
     const struct addrinfo hints = {
+            .ai_flags = AI_ADDRCONFIG,  // Use the same parameter as Inet6AddressImpl.java.
             .ai_family = args.family,
             .ai_socktype = SOCK_DGRAM,
     };

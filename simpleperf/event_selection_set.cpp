@@ -682,8 +682,13 @@ bool EventSelectionSet::OpenEventFilesOnGroup(EventSelectionGroup& group, pid_t 
   for (auto& selection : group.selections) {
 #if defined(__i386__) || defined(__x86_64__)
     perf_event_attr attr = selection.event_attr;
-    std::set<int> atom_cpus = GetX86IntelAtomCpus();
-    if (atom_cpus.count(cpu) > 0) {
+    if (attr.type == PERF_TYPE_RAW && GetX86IntelAtomCpus().count(cpu) > 0) {
+      std::optional<uint32_t> atom_type = GetX86IntelAtomCpuEventType();
+      if (!atom_type.has_value()) {
+        LOG(ERROR) << "Can't read pmu type for Intel Atom CPU";
+        return false;
+      }
+      attr.type = atom_type.value();
       attr.config = selection.event_type_modifier.event_type.GetIntelAtomCpuConfig();
     }
     std::unique_ptr<EventFd> event_fd =
