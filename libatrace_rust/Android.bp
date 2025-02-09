@@ -81,7 +81,7 @@ rust_bindgen {
         "--allowlist-var=atrace_.*",
     ],
     shared_libs: ["libcutils"],
-    static_libs: ["libcutils_trace_bindgen_wrap"],
+    whole_static_libs: ["libcutils_trace_bindgen_wrap"],
     // Host support is for unit tests.
     host_supported: true,
     product_available: true,

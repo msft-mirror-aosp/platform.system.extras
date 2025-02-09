@@ -17,12 +17,14 @@
 
 import builtins
 import io
+from io import BytesIO
 import socketserver
 import unittest
 import subprocess
 import sys
 import os
 import webbrowser
+from command import OpenCommand
 from unittest import mock
 from open_ui import download_trace_processor, open_trace
 
@@ -129,8 +131,10 @@ class OpenUiUnitTest(unittest.TestCase):
   @mock.patch.object(subprocess, "run", autospec=True)
   @mock.patch.object(os.path, "exists", autospec=True)
   @mock.patch.object(os.path, "expanduser", autospec=True)
-  def test_open_trace_scripts_large_file(self, mock_expanduser, mock_exists,
-      mock_subprocess_run, mock_open_new_tab, mock_abspath, mock_getsize):
+  @mock.patch.object(subprocess, "Popen", autospec=True)
+  def test_open_trace_scripts_large_file(self, mock_popen, mock_expanduser,
+      mock_exists, mock_subprocess_run, mock_open_new_tab, mock_abspath,
+      mock_getsize):
     mock_expanduser.return_value = ""
     mock_subprocess_run.return_value = None
     mock_open_new_tab.return_value = None
@@ -139,15 +143,19 @@ class OpenUiUnitTest(unittest.TestCase):
     mock_exists.return_value = True
     terminal_output = io.StringIO()
     sys.stdout = terminal_output
+    mock_process = mock_popen.return_value
+    mock_process.stdout = BytesIO(b'Trace loaded')
 
     error = open_trace(TEST_FILE, WEB_UI_ADDRESS, False)
 
     mock_open_new_tab.assert_called()
     self.assertEqual(error, None)
     self.assertEqual(terminal_output.getvalue(),
-                     "Refresh the Perfetto UI once the trace is loaded and "
-                     "follow the directions. Do not exit out of torq until you "
-                     "are done viewing the trace.\n")
+                     "\033[93m##### Loading trace. #####\n##### "
+                     "Follow the directions in the Perfetto UI. Do not exit "
+                     "out of torq until you are done viewing the trace. Press "
+                     "CTRL+C to exit torq and close the trace_processor. "
+                     "#####\033[0m\nProcess was killed.\n")
 
   @mock.patch.dict(os.environ, {"ANDROID_BUILD_TOP": ANDROID_BUILD_TOP},
                    clear=True)
@@ -155,29 +163,35 @@ class OpenUiUnitTest(unittest.TestCase):
   @mock.patch.object(os.path, "getsize", autospec=True)
   @mock.patch.object(webbrowser, "open_new_tab", autospec=True)
   @mock.patch.object(subprocess, "run", autospec=True)
+  @mock.patch.object(subprocess, "Popen", autospec=True)
   def test_open_trace_scripts_large_file_use_trace_processor_enabled(self,
-      mock_subprocess_run, mock_open_new_tab, mock_getsize, mock_exists):
+      mock_popen, mock_subprocess_run, mock_open_new_tab, mock_getsize,
+      mock_exists):
     mock_subprocess_run.return_value = None
     mock_open_new_tab.return_value = None
     mock_getsize.return_value = LARGE_FILE_SIZE
     mock_exists.return_value = True
     terminal_output = io.StringIO()
     sys.stdout = terminal_output
+    mock_process = mock_popen.return_value
+    mock_process.stdout = BytesIO(b'Trace loaded')
 
     error = open_trace(TEST_FILE, WEB_UI_ADDRESS, True)
 
     mock_open_new_tab.assert_called()
     self.assertEqual(error, None)
     self.assertEqual(terminal_output.getvalue(),
-                     "Refresh the Perfetto UI once the trace is loaded and "
-                     "follow the directions. Do not exit out of torq until you "
-                     "are done viewing the trace.\n")
+                     "\033[93m##### Loading trace. #####\n##### "
+                     "Follow the directions in the Perfetto UI. Do not exit "
+                     "out of torq until you are done viewing the trace. Press "
+                     "CTRL+C to exit torq and close the trace_processor. "
+                     "#####\033[0m\nProcess was killed.\n")
 
   @mock.patch.object(os.path, "getsize", autospec=True)
   @mock.patch.object(webbrowser, "open_new_tab", autospec=True)
   @mock.patch.object(socketserver, "TCPServer", autospec=True)
-  def test_open_trace_scripts_small_file(self,
-      mock_tcpserver, mock_open_new_tab, mock_getsize):
+  def test_open_trace_scripts_small_file(self, mock_tcpserver,
+      mock_open_new_tab, mock_getsize):
     def handle_request():
       mock_process.fname_get_completed = 0
       return
@@ -201,23 +215,29 @@ class OpenUiUnitTest(unittest.TestCase):
   @mock.patch.object(os.path, "getsize", autospec=True)
   @mock.patch.object(webbrowser, "open_new_tab", autospec=True)
   @mock.patch.object(subprocess, "run", autospec=True)
+  @mock.patch.object(subprocess, "Popen", autospec=True)
   def test_download_trace_processor_small_file_use_trace_processor_enabled(self,
-      mock_subprocess_run, mock_open_new_tab, mock_getsize, mock_exists):
+      mock_popen, mock_subprocess_run, mock_open_new_tab, mock_getsize,
+      mock_exists):
     mock_subprocess_run.return_value = None
     mock_open_new_tab.return_value = None
     mock_getsize.return_value = 0
     mock_exists.return_value = True
     terminal_output = io.StringIO()
     sys.stdout = terminal_output
+    mock_process = mock_popen.return_value
+    mock_process.stdout = BytesIO(b'Trace loaded')
 
     error = open_trace(TEST_FILE, WEB_UI_ADDRESS, True)
 
     mock_open_new_tab.assert_called()
     self.assertEqual(error, None)
     self.assertEqual(terminal_output.getvalue(),
-                     "Refresh the Perfetto UI once the trace is loaded and "
-                     "follow the directions. Do not exit out of torq until you "
-                     "are done viewing the trace.\n")
+                     "\033[93m##### Loading trace. #####\n##### "
+                     "Follow the directions in the Perfetto UI. Do not exit "
+                     "out of torq until you are done viewing the trace. Press "
+                     "CTRL+C to exit torq and close the trace_processor. "
+                     "#####\033[0m\nProcess was killed.\n")
 
   @mock.patch.dict(os.environ, {"ANDROID_BUILD_TOP": ANDROID_BUILD_TOP},
                    clear=True)
