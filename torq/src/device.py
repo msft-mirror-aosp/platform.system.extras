@@ -19,7 +19,7 @@ import os
 import subprocess
 import time
 
-from validation_error import ValidationError
+from .validation_error import ValidationError
 
 ADB_ROOT_TIMED_OUT_LIMIT_SECS = 5
 ADB_BOOT_COMPLETED_TIMED_OUT_LIMIT_SECS = 30
@@ -152,6 +152,9 @@ class AdbDevice:
 
   def set_prop(self, prop, value):
     subprocess.run(["adb", "-s", self.serial, "shell", "setprop", prop, value])
+
+  def clear_prop(self, prop):
+    subprocess.run(["adb", "-s", self.serial, "shell", "setprop", prop, "\"\""])
 
   def reboot(self):
     subprocess.run(["adb", "-s", self.serial, "reboot"])
