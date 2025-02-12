@@ -173,6 +173,7 @@ class RecordCommand : public Command {
 "               2) a raw PMU event in rN format. N is a hex number.\n"
 "                  For example, r1b selects event number 0x1b.\n"
 "               3) a kprobe event added by --kprobe option.\n"
+"               4) a uprobe event added by --uprobe option.\n"
 "             Modifiers can be added to define how the event should be\n"
 "             monitored. Possible modifiers are:\n"
 "                u - monitor user space events only\n"
@@ -188,6 +189,13 @@ class RecordCommand : public Command {
 "             Documentation/trace/kprobetrace.rst in the kernel. Examples:\n"
 "               'p:myprobe do_sys_openat2 $arg2:string'   - add event kprobes:myprobe\n"
 "               'r:myretprobe do_sys_openat2 $retval:s64' - add event kprobes:myretprobe\n"
+"--uprobe uprobe_event1,uprobe_event2,...\n"
+"             Add uprobe events during recording. The uprobe_event format is in\n"
+"             Documentation/trace/uprobetracer.rst in the kernel. Examples:\n"
+"               'p:myprobe /system/lib64/libc.so:0x1000'\n"
+"                   - add event uprobes:myprobe\n"
+"               'r:myretprobe /system/lib64/libc.so:0x1000'\n"
+"                   - add event uprobes:myretprobe\n"
 "--add-counter event1,event2,...     Add additional event counts in record samples. For example,\n"
 "                                    we can use `-e cpu-cycles --add-counter instructions` to\n"
 "                                    get samples for cpu-cycles event, while having instructions\n"
@@ -1132,7 +1140,15 @@ bool RecordCommand::ParseOptions(const std::vector<std::string>& args,
   for (const OptionValue& value : options.PullValues("--kprobe")) {
     std::vector<std::string> cmds = android::base::Split(value.str_value, ",");
     for (const auto& cmd : cmds) {
-      if (!probe_events.AddKprobe(cmd)) {
+      if (!probe_events.AddProbe(ProbeEventType::kKprobe, cmd)) {
+        return false;
+      }
+    }
+  }
+  for (const OptionValue& value : options.PullValues("--uprobe")) {
+    std::vector<std::string> cmds = android::base::Split(value.str_value, ",");
+    for (const auto& cmd : cmds) {
+      if (!probe_events.AddProbe(ProbeEventType::kUprobe, cmd)) {
         return false;
       }
     }
