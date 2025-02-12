@@ -56,9 +56,9 @@ TEST(TempSymFile, smoke) {
 TEST(JITDebugReader, read_dex_file_in_memory) {
   // 1. Create dex file in memory. Use mmap instead of malloc, to avoid the pointer from
   // being modified by memory tag (or pointer authentication?) on ARM64.
-  std::string dex_file = GetTestData("base.vdex");
+  std::string dex_file = GetTestData("base.dex");
   uint64_t file_size = GetFileSize(dex_file);
-  const uint64_t dex_file_offset = 0x28;
+  const uint64_t dex_file_offset = 0;
   ASSERT_GT(file_size, dex_file_offset);
   uint64_t symfile_size = file_size - dex_file_offset;
   void* symfile_addr =
@@ -90,7 +90,7 @@ TEST(JITDebugReader, read_dex_file_in_memory) {
   ASSERT_EQ(info.dex_file_map->start_addr, reinterpret_cast<uintptr_t>(symfile_addr));
   ASSERT_EQ(info.dex_file_map->len, symfile_size);
   ASSERT_TRUE(android::base::StartsWith(info.dex_file_map->name, kDexFileInMemoryPrefix));
-  ASSERT_EQ(info.symbols.size(), 12435);
+  ASSERT_EQ(info.symbols.size(), 3912);
   // 4. Test if the symbols are sorted.
   uint64_t prev_addr = 0;
   for (const auto& symbol : info.symbols) {
