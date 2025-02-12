@@ -1525,3 +1525,12 @@ TEST(record_cmd, compression_option) {
 
   ASSERT_TRUE(RunRecordCmd({"-z=3"}, tmpfile.path));
 }
+
+// @CddTest = 6.1/C-0-2
+TEST(record_cmd, child_process) {
+  // Test that we can run simpleperf to record samples for a child process in shell.
+  TemporaryFile tmpfile;
+  ASSERT_TRUE(Workload::RunCmd({"/system/bin/simpleperf", "record", "-e", GetDefaultEvent(), "-o",
+                                tmpfile.path, "sleep", SLEEP_SEC},
+                               true));
+}
