@@ -183,16 +183,16 @@ TEST(DebugElfFileFinder, build_id_mismatch) {
 TEST(dso, dex_file_dso) {
 #if defined(__linux__)
   for (DsoType dso_type : {DSO_DEX_FILE, DSO_ELF_FILE}) {
-    std::unique_ptr<Dso> dso = Dso::CreateDso(dso_type, GetTestData("base.vdex"));
+    std::unique_ptr<Dso> dso = Dso::CreateDso(dso_type, GetTestData("base.dex"));
     ASSERT_TRUE(dso);
-    dso->AddDexFileOffset(0x28);
+    dso->AddDexFileOffset(0);
     ASSERT_EQ(DSO_DEX_FILE, dso->type());
-    const Symbol* symbol = dso->FindSymbol(0x6c77e);
+    const Symbol* symbol = dso->FindSymbol(0x613ec);
     ASSERT_NE(symbol, nullptr);
-    ASSERT_EQ(symbol->addr, static_cast<uint64_t>(0x6c77e));
-    ASSERT_EQ(symbol->len, static_cast<uint64_t>(0x16));
+    ASSERT_EQ(symbol->addr, static_cast<uint64_t>(0x613ec));
+    ASSERT_EQ(symbol->len, static_cast<uint64_t>(0x128));
     ASSERT_STREQ(symbol->DemangledName(),
-                 "com.example.simpleperf.simpleperfexamplewithnative.MixActivity$1.run");
+                 "com.example.android.displayingbitmaps.ui.ImageDetailActivity.onCreate");
     uint64_t min_vaddr;
     uint64_t file_offset_of_min_vaddr;
     dso->GetMinExecutableVaddr(&min_vaddr, &file_offset_of_min_vaddr);
@@ -384,7 +384,7 @@ TEST(dso, read_symbol_warning) {
   }
   {
     // Don't warn when the file may not be an ELF file.
-    auto dso = Dso::CreateDso(DSO_ELF_FILE, GetTestData("base.vdex"));
+    auto dso = Dso::CreateDso(DSO_ELF_FILE, GetTestData("base.dex"));
     CapturedStderr capture;
     dso->LoadSymbols();
     ASSERT_EQ(capture.str().find("failed to read symbols"), std::string::npos);

@@ -144,10 +144,8 @@ cc_defaults {
         "libziparchive",
         "libzstd",
     ],
+    stl: "libc++_static",
     target: {
-        host: {
-            stl: "libc++_static",
-        },
         linux: {
             static_libs: [
                 "libunwindstack",
@@ -310,7 +308,6 @@ cc_library_static {
 
     target: {
         linux: {
-            // See note for libdexfile_static in simpleperf_ndk.
             static_libs: ["libdexfile_support"],
             runtime_libs: ["libdexfile"], // libdexfile_support dependency
         },
@@ -395,13 +392,8 @@ cc_binary {
         "libsimpleperf",
     ],
 
+    min_sdk_version: "31",
     target: {
-        android: {
-            static_executable: true,
-            static_libs: [
-                "libc",
-            ],
-        },
         android_arm: {
             dist: {
                 dir: "simpleperf/android/arm",
@@ -436,11 +428,8 @@ cc_binary {
             },
         },
         linux: {
-            // In the NDK we need libdexfile_static which links libdexfile and
-            // its ART dependencies statically. However in other libraries we
-            // must use libdexfile_support, which dlopen's libdexfile.so from
-            // the ART APEX, to avoid getting ART internals in the system image.
-            static_libs: ["libdexfile_static"],
+            static_libs: ["libdexfile_support"],
+            runtime_libs: ["libdexfile"], // libdexfile_support dependency
         },
         linux_glibc_x86: {
             dist: {
@@ -493,12 +482,12 @@ cc_library {
         darwin: {
             enabled: false,
         },
+        linux: {
+            static_libs: ["libdexfile_support"],
+            runtime_libs: ["libdexfile"], // libdexfile_support dependency
+        },
         windows: {
             enabled: false,
-        },
-        linux: {
-            // See note for libdexfile_static in simpleperf_ndk.
-            static_libs: ["libdexfile_static"],
         },
     },
 }
@@ -523,7 +512,6 @@ cc_library_shared {
         },
         linux: {
             ldflags: ["-Wl,--exclude-libs,ALL"],
-            // See note for libdexfile_static in simpleperf_ndk.
             static_libs: ["libdexfile_static"],
         },
         darwin: {
