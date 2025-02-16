@@ -20,7 +20,7 @@ import sys
 import os
 import subprocess
 from unittest import mock
-from torq import create_parser, verify_args
+from src.torq import create_parser, verify_args
 
 TORQ_TEMP_DIR = "/tmp/.torq"
 ANDROID_BUILD_TOP = "/folder"
@@ -31,9 +31,8 @@ SYMBOLS_PATH = "/folder/symbols"
 class ValidateSimpleperfUnitTest(unittest.TestCase):
 
   def set_up_parser(self, command_string):
-    parser = create_parser()
     sys.argv = command_string.split()
-    return parser
+    return create_parser()
 
   @mock.patch.object(os.path, "exists", autospec=True)
   @mock.patch.object(os.path, "isdir", autospec=True)

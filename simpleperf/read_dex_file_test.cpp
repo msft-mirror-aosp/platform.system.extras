@@ -33,12 +33,12 @@ TEST(read_dex_file, smoke) {
   auto symbol_callback = [&](DexFileSymbol* symbol) {
     symbols.emplace_back(symbol->name, symbol->addr, symbol->size);
   };
-  ASSERT_TRUE(ReadSymbolsFromDexFile(GetTestData("base.vdex"), {0x28}, symbol_callback));
-  ASSERT_EQ(12435u, symbols.size());
+  ASSERT_TRUE(ReadSymbolsFromDexFile(GetTestData("base.dex"), {0}, symbol_callback));
+  ASSERT_EQ(3912u, symbols.size());
   auto it = std::find_if(symbols.begin(), symbols.end(),
-                         [](const Symbol& symbol) { return symbol.addr == 0x6c77e; });
+                         [](const Symbol& symbol) { return symbol.addr == 0x613ec; });
   ASSERT_NE(it, symbols.end());
-  ASSERT_EQ(it->addr, 0x6c77e);
-  ASSERT_EQ(it->len, 0x16);
-  ASSERT_STREQ(it->Name(), "com.example.simpleperf.simpleperfexamplewithnative.MixActivity$1.run");
+  ASSERT_EQ(it->addr, 0x613ec);
+  ASSERT_EQ(it->len, 0x128);
+  ASSERT_STREQ(it->Name(), "com.example.android.displayingbitmaps.ui.ImageDetailActivity.onCreate");
 }
