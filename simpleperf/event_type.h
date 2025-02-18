@@ -19,6 +19,7 @@
 
 #include <stdint.h>
 #include <strings.h>
+#include <functional>
 #include <memory>
 #include <set>
 #include <string>
