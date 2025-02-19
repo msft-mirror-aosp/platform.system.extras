@@ -87,7 +87,8 @@ def download_trace_processor(path):
                               "Are you ok with this download? [Y/N]: "
                               % (ANDROID_PERFETTO_TOOLS_DIR, TORQ_TEMP_DIR),
                               "Please accept or reject the download.",
-                              download_accepted_callback, rejected_callback)
+                              {"y": download_accepted_callback,
+                               "n": rejected_callback})
 
   return input_handler.handle_input()
 
