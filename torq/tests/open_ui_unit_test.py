@@ -101,7 +101,6 @@ class OpenUiUnitTest(unittest.TestCase):
     self.assertEqual(error.suggestion, "Please accept or reject the download.")
     self.assertEqual(terminal_output.getvalue(),
                      "Invalid input. Please try again.\n"
-                     "Invalid input. Please try again.\n"
                      "Invalid input. Please try again.\n")
 
   @mock.patch.dict(os.environ, {"ANDROID_BUILD_TOP": ANDROID_BUILD_TOP},
