@@ -1382,6 +1382,10 @@ TEST(record_cmd, uprobe_option) {
     GTEST_LOG_(INFO) << "Skip this test as uprobe isn't supported by the kernel.";
     return;
   }
+  if (!IsRegularFile("/system/lib64/libc.so")) {
+    GTEST_LOG_(INFO) << "Skip this test as /system/lib64/libc.so doesn't exist";
+    return;
+  }
   ASSERT_TRUE(RunRecordCmd(
       {"-e", "uprobes:myprobe", "--uprobe", "p:myprobe /system/lib64/libc.so:0x88e80"}));
   ASSERT_TRUE(RunRecordCmd(
