@@ -26,27 +26,60 @@ using namespace simpleperf;
 // @CddTest = 6.1/C-0-2
 TEST(probe_events, ParseKprobeEventName) {
   ProbeEvent event;
-  ASSERT_TRUE(ProbeEvents::ParseKprobeEventName("p:myprobe do_sys_open", &event));
+  ASSERT_TRUE(
+      ProbeEvents::ParseProbeEventName(ProbeEventType::kKprobe, "p:myprobe do_sys_open", &event));
   ASSERT_EQ(event.group_name, "kprobes");
   ASSERT_EQ(event.event_name, "myprobe");
 
-  ASSERT_TRUE(ProbeEvents::ParseKprobeEventName("p:mygroup/myprobe do_sys_open", &event));
+  ASSERT_TRUE(ProbeEvents::ParseProbeEventName(ProbeEventType::kKprobe,
+                                               "p:mygroup/myprobe do_sys_open", &event));
   ASSERT_EQ(event.group_name, "mygroup");
   ASSERT_EQ(event.event_name, "myprobe");
 
-  ASSERT_TRUE(ProbeEvents::ParseKprobeEventName("p do_sys_open", &event));
+  ASSERT_TRUE(ProbeEvents::ParseProbeEventName(ProbeEventType::kKprobe, "p do_sys_open", &event));
   ASSERT_EQ(event.group_name, "kprobes");
   ASSERT_EQ(event.event_name, "p_do_sys_open_0");
 
-  ASSERT_TRUE(ProbeEvents::ParseKprobeEventName("r do_sys_open+138", &event));
+  ASSERT_TRUE(
+      ProbeEvents::ParseProbeEventName(ProbeEventType::kKprobe, "r do_sys_open+138", &event));
   ASSERT_EQ(event.group_name, "kprobes");
   ASSERT_EQ(event.event_name, "r_do_sys_open_138");
 
-  ASSERT_TRUE(ProbeEvents::ParseKprobeEventName("r module:do_sys_open+138", &event));
+  ASSERT_TRUE(ProbeEvents::ParseProbeEventName(ProbeEventType::kKprobe, "r module:do_sys_open+138",
+                                               &event));
   ASSERT_EQ(event.group_name, "kprobes");
   ASSERT_EQ(event.event_name, "r_module_do_sys_open_138");
 
-  ASSERT_TRUE(ProbeEvents::ParseKprobeEventName("p 0x12345678", &event));
+  ASSERT_TRUE(ProbeEvents::ParseProbeEventName(ProbeEventType::kKprobe, "p 0x12345678", &event));
   ASSERT_EQ(event.group_name, "kprobes");
   ASSERT_EQ(event.event_name, "p_0x12345678");
+}
+
+// @CddTest = 6.1/C-0-2
+TEST(probe_events, ParseUprobeEventName) {
+  ProbeEvent event;
+  ASSERT_TRUE(ProbeEvents::ParseProbeEventName(ProbeEventType::kUprobe,
+                                               "p:myprobe /system/lib64/libc.so:0x88e80", &event));
+  ASSERT_EQ(event.group_name, "uprobes");
+  ASSERT_EQ(event.event_name, "myprobe");
+
+  ASSERT_TRUE(ProbeEvents::ParseProbeEventName(
+      ProbeEventType::kUprobe, "p:mygroup/myprobe /system/lib64/libc.so:0x88e80", &event));
+  ASSERT_EQ(event.group_name, "mygroup");
+  ASSERT_EQ(event.event_name, "myprobe");
+
+  ASSERT_TRUE(ProbeEvents::ParseProbeEventName(ProbeEventType::kUprobe,
+                                               "p /system/lib64/libc.so:0x88e80", &event));
+  ASSERT_EQ(event.group_name, "uprobes");
+  ASSERT_EQ(event.event_name, "p_libc_0x88e80");
+
+  ASSERT_TRUE(ProbeEvents::ParseProbeEventName(ProbeEventType::kUprobe,
+                                               "p /system/lib64/libc.so:560768", &event));
+  ASSERT_EQ(event.group_name, "uprobes");
+  ASSERT_EQ(event.event_name, "p_libc_0x88e80");
+
+  ASSERT_TRUE(ProbeEvents::ParseProbeEventName(ProbeEventType::kUprobe,
+                                               "r /system/lib64/libc.so:0x88e80", &event));
+  ASSERT_EQ(event.group_name, "uprobes");
+  ASSERT_EQ(event.event_name, "p_libc_0x88e80");
 }
