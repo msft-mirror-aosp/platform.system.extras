@@ -24,7 +24,13 @@ namespace simpleperf {
 
 class EventSelectionSet;
 
+enum class ProbeEventType {
+  kKprobe,
+  kUprobe,
+};
+
 struct ProbeEvent {
+  ProbeEventType type;
   std::string group_name;
   std::string event_name;
 };
@@ -36,23 +42,27 @@ class ProbeEvents {
   ProbeEvents(EventSelectionSet& event_selection_set) : event_selection_set_(event_selection_set) {}
   ~ProbeEvents();
 
-  static bool ParseKprobeEventName(const std::string& kprobe_cmd, ProbeEvent* event);
-  bool IsKprobeSupported();
+  static bool ParseProbeEventName(ProbeEventType type, const std::string& kprobe_cmd,
+                                  ProbeEvent* event);
+  bool IsProbeSupported(ProbeEventType type);
 
-  // Accept kprobe cmd as in <linux_kernel>/Documentation/trace/kprobetrace.rst.
-  bool AddKprobe(const std::string& kprobe_cmd);
+  // Accept kprobe cmd as in <linux_kernel>/Documentation/trace/kprobetrace.rst
+  // or uprobe cmd as in <linux_kernel>/Documentation/trace/uprobetracer.rst.
+  bool AddProbe(ProbeEventType type, const std::string& probe_cmd);
   // If not exist, add a kprobe tracepoint at the function entry.
   bool CreateProbeEventIfNotExist(const std::string& event_name);
 
  private:
-  bool IsProbeEvent(const std::string& event_name);
-  bool IsEmpty() const { return kprobe_events_.empty(); }
+  bool IsKprobeEvent(const std::string& event_name);
+  bool IsEmpty() const { return probe_events_.empty(); }
   void Clear();
-  bool WriteKprobeCmd(const std::string& kprobe_cmd);
+  bool WriteProbeCmd(ProbeEventType type, const std::string& probe_cmd);
+  std::optional<std::string>& GetProbeControlPath(ProbeEventType type);
 
   EventSelectionSet& event_selection_set_;
-  std::vector<ProbeEvent> kprobe_events_;
+  std::vector<ProbeEvent> probe_events_;
   std::optional<std::string> kprobe_control_path_;
+  std::optional<std::string> uprobe_control_path_;
 };
 
 }  // namespace simpleperf

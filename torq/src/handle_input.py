@@ -17,26 +17,32 @@
 from .validation_error import ValidationError
 
 class HandleInput:
-  def __init__(self, input_msg, fail_suggestion, yes_callback_func,
-      no_callback_func):
+  """Class that requests input from the user with a message and then calls a
+  callback based on the user's input, or gives an error if no valid input was
+  given
+
+  Attributes:
+    input_msg: A string containing a message that is displayed when requesting user input
+    fail_suggestion: A string containing a suggestion displayed when the user exceeds max attempts
+    choices: A dictionary mapping possible user inputs (key) to functions (value)
+  """
+  def __init__(self, input_msg, fail_suggestion, choices):
     self.input_msg = input_msg
     self.fail_suggestion = fail_suggestion
-    self.yes_callback_func = yes_callback_func
-    self.no_callback_func = no_callback_func
+    self.choices = choices
     self.max_attempts = 3
 
   def handle_input(self):
     i = 0
     while i < self.max_attempts:
-      confirmation = input(self.input_msg)
+      response = input(self.input_msg)
 
-      if confirmation.lower() == "y":
-        return self.yes_callback_func()
-      if confirmation.lower() == "n":
-        return self.no_callback_func()
+      if response.lower() in self.choices:
+        return self.choices[response]()
 
-      print("Invalid input. Please try again.")
       i += 1
+      if i < self.max_attempts:
+        print("Invalid input. Please try again.")
 
     return ValidationError("Invalid inputs.",
                            self.fail_suggestion)
