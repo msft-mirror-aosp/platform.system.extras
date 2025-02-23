@@ -394,6 +394,13 @@ class StatCommand : public Command {
 "             Documentation/trace/kprobetrace.rst in the kernel. Examples:\n"
 "               'p:myprobe do_sys_openat2 $arg2:string'   - add event kprobes:myprobe\n"
 "               'r:myretprobe do_sys_openat2 $retval:s64' - add event kprobes:myretprobe\n"
+"--uprobe uprobe_event1,uprobe_event2,...\n"
+"             Add uprobe events during stating. The uprobe_event format is in\n"
+"             Documentation/trace/uprobetracer.rst in the kernel. Examples:\n"
+"               'p:myprobe /system/lib64/libc.so:0x1000'\n"
+"                   - add event uprobes:myprobe\n"
+"               'r:myretprobe /system/lib64/libc.so:0x1000'\n"
+"                   - add event uprobes:myretprobe\n"
 "--no-inherit     Don't stat created child threads/processes.\n"
 "-o output_filename  Write report to output_filename instead of standard output.\n"
 "--per-core       Print counters for each cpu core.\n"
@@ -677,7 +684,14 @@ bool StatCommand::ParseOptions(const std::vector<std::string>& args,
   in_app_context_ = options.PullBoolValue("--in-app");
   for (const OptionValue& value : options.PullValues("--kprobe")) {
     for (const auto& cmd : Split(value.str_value, ",")) {
-      if (!probe_events.AddKprobe(cmd)) {
+      if (!probe_events.AddProbe(ProbeEventType::kKprobe, cmd)) {
+        return false;
+      }
+    }
+  }
+  for (const OptionValue& value : options.PullValues("--uprobe")) {
+    for (const auto& cmd : Split(value.str_value, ",")) {
+      if (!probe_events.AddProbe(ProbeEventType::kUprobe, cmd)) {
         return false;
       }
     }

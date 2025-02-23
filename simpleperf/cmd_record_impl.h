@@ -69,6 +69,7 @@ inline const OptionFormatMap& GetRecordCmdOptionFormats() {
         {"--keep-failed-unwinding-debug-info",
          {OptionValueType::NONE, OptionType::SINGLE, AppRunnerType::NOT_ALLOWED}},
         {"--kprobe", {OptionValueType::STRING, OptionType::MULTIPLE, AppRunnerType::NOT_ALLOWED}},
+        {"--uprobe", {OptionValueType::STRING, OptionType::MULTIPLE, AppRunnerType::NOT_ALLOWED}},
         {"-m", {OptionValueType::UINT, OptionType::SINGLE, AppRunnerType::ALLOWED}},
         {"--no-callchain-joiner",
          {OptionValueType::NONE, OptionType::SINGLE, AppRunnerType::ALLOWED}},
