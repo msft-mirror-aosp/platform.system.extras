@@ -1363,7 +1363,7 @@ TEST(record_cmd, kprobe_option) {
   TEST_REQUIRE_ROOT();
   EventSelectionSet event_selection_set(false);
   ProbeEvents probe_events(event_selection_set);
-  if (!probe_events.IsKprobeSupported()) {
+  if (!probe_events.IsProbeSupported(ProbeEventType::kKprobe)) {
     GTEST_LOG_(INFO) << "Skip this test as kprobe isn't supported by the kernel.";
     return;
   }
@@ -1371,6 +1371,29 @@ TEST(record_cmd, kprobe_option) {
   // A default kprobe event is created if not given an explicit --kprobe option.
   ASSERT_TRUE(RunRecordCmd({"-e", "kprobes:do_sys_openat2"}));
   ASSERT_TRUE(RunRecordCmd({"--group", "kprobes:do_sys_openat2"}));
+}
+
+// @CddTest = 6.1/C-0-2
+TEST(record_cmd, uprobe_option) {
+  TEST_REQUIRE_ROOT();
+  EventSelectionSet event_selection_set(false);
+  ProbeEvents probe_events(event_selection_set);
+  if (!probe_events.IsProbeSupported(ProbeEventType::kUprobe)) {
+    GTEST_LOG_(INFO) << "Skip this test as uprobe isn't supported by the kernel.";
+    return;
+  }
+  if (!IsRegularFile("/system/lib64/libc.so")) {
+    GTEST_LOG_(INFO) << "Skip this test as /system/lib64/libc.so doesn't exist";
+    return;
+  }
+  ASSERT_TRUE(RunRecordCmd(
+      {"-e", "uprobes:myprobe", "--uprobe", "p:myprobe /system/lib64/libc.so:0x88e80"}));
+  ASSERT_TRUE(RunRecordCmd(
+      {"-e", "uprobes:p_libc_0x88e80", "--uprobe", "p /system/lib64/libc.so:0x88e80"}));
+  ASSERT_TRUE(RunRecordCmd(
+      {"-e", "uprobes:myprobe", "--uprobe", "r:myprobe /system/lib64/libc.so:0x88e80"}));
+  ASSERT_TRUE(RunRecordCmd(
+      {"-e", "uprobes:p_libc_0x88e80", "--uprobe", "r /system/lib64/libc.so:0x88e80"}));
 }
 
 // @CddTest = 6.1/C-0-2
@@ -1524,4 +1547,13 @@ TEST(record_cmd, compression_option) {
   ASSERT_GT(records.size(), 0U);
 
   ASSERT_TRUE(RunRecordCmd({"-z=3"}, tmpfile.path));
+}
+
+// @CddTest = 6.1/C-0-2
+TEST(record_cmd, child_process) {
+  // Test that we can run simpleperf to record samples for a child process in shell.
+  TemporaryFile tmpfile;
+  ASSERT_TRUE(Workload::RunCmd({"/system/bin/simpleperf", "record", "-e", GetDefaultEvent(), "-o",
+                                tmpfile.path, "sleep", SLEEP_SEC},
+                               true));
 }

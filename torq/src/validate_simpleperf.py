@@ -96,6 +96,7 @@ def download_simpleperf_scripts():
                                "simpleperf, torq will download simpleperf "
                                "scripts to '%s'. Are you ok with this download?"
                                " [Y/N]: " % TORQ_TEMP_DIR), fail_suggestion,
-                              download_accepted_callback, rejected_callback)
+                              {"y": download_accepted_callback,
+                               "n": rejected_callback})
 
   return input_handler.handle_input()

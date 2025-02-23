@@ -76,8 +76,10 @@ int main(int argc, char** argv) {
   if (!AndroidSecurityCheck()) {
     return 1;
   }
-  // Disable core dump to avoid leaking raw sample info.
-  prctl(PR_SET_DUMPABLE, 0);
+  if (IsInAppUid()) {
+    // Disable core dump in app context to avoid leaking raw sample info.
+    prctl(PR_SET_DUMPABLE, 0);
+  }
 #endif
   RegisterAllCommands();
   return RunSimpleperfCmd(argc, argv) ? 0 : 1;
