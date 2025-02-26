@@ -348,6 +348,76 @@ class DevfreqCounters {
   std::vector<std::string> mem_latency_governor_paths_;
 };
 
+// Periodically scan /proc for new threads. If found, create new perf event files for the
+// new threads.
+class NewThreadMonitor {
+ private:
+  const int SCAN_INTERVAL_US = 1;
+
+ public:
+  NewThreadMonitor(EventSelectionSet& event_selection_set, bool monitor_all_processes,
+                   const std::set<pid_t>& monitored_processes,
+                   std::unordered_map<pid_t, ThreadInfo>& threads)
+      : event_selection_set_(event_selection_set),
+        monitor_all_processes_(monitor_all_processes),
+        monitored_processes_(monitored_processes),
+        threads_(threads) {}
+
+  bool Start() {
+    IOEventLoop* loop = event_selection_set_.GetIOEventLoop();
+    timeval tv;
+    tv.tv_sec = 0;
+    tv.tv_usec = SCAN_INTERVAL_US;
+    if (!loop->AddPeriodicEvent(tv, std::bind(&NewThreadMonitor::Scan, this))) {
+      return false;
+    }
+    return true;
+  }
+
+ private:
+  bool Scan() {
+    std::unordered_set<pid_t> new_tids;
+    if (monitor_all_processes_) {
+      for (int pid : GetAllProcesses()) {
+        for (auto tid : GetThreadsInProcess(pid)) {
+          if (threads_.count(tid) == 0) {
+            new_tids.insert(tid);
+          }
+        }
+      }
+    } else {
+      for (auto tid : monitored_processes_) {
+        for (auto tid : GetThreadsInProcess(tid)) {
+          if (threads_.count(tid) == 0) {
+            new_tids.insert(tid);
+          }
+        }
+      }
+    }
+    std::set<pid_t> open_event_file_tids;
+    for (auto tid : new_tids) {
+      ThreadInfo info;
+      if (ReadThreadNameAndPid(tid, &info.name, &info.pid)) {
+        info.tid = tid;
+        threads_[tid] = std::move(info);
+        open_event_file_tids.insert(tid);
+      }
+    }
+    if (!open_event_file_tids.empty()) {
+      // It's okay for OpenEventFilesForThreads() to return false. It happens
+      // when the new threads exit before we can open event files for them.
+      event_selection_set_.OpenEventFilesForThreads(open_event_file_tids);
+    }
+    return true;
+  }
+
+ private:
+  EventSelectionSet& event_selection_set_;
+  bool monitor_all_processes_ = false;
+  std::set<pid_t> monitored_processes_;
+  std::unordered_map<pid_t, ThreadInfo>& threads_;
+};
+
 class StatCommand : public Command {
  public:
   StatCommand()
@@ -405,6 +475,8 @@ class StatCommand : public Command {
 "-o output_filename  Write report to output_filename instead of standard output.\n"
 "--per-core       Print counters for each cpu core.\n"
 "--per-thread     Print counters for each thread.\n"
+"--monitor-new-thread  Print counters for new threads created after stating. It should be used\n"
+"                      With --per-thread and --no-inherit.\n"
 "-p pid_or_process_name_regex1,pid_or_process_name_regex2,...\n"
 "                      Stat events on existing processes. Processes are searched either by pid\n"
 "                      or process name regex. Mutually exclusive with -a.\n"
@@ -490,6 +562,7 @@ class StatCommand : public Command {
 
   bool report_per_core_ = false;
   bool report_per_thread_ = false;
+  bool monitor_new_thread_ = false;
   // used to report event count for each thread
   std::unordered_map<pid_t, ThreadInfo> thread_info_;
   // used to sort report
@@ -562,7 +635,12 @@ bool StatCommand::Run(const std::vector<std::string>& args) {
   } else {
     need_to_check_targets = true;
   }
-
+  std::unique_ptr<NewThreadMonitor> new_thread_monitor;
+  if (monitor_new_thread_) {
+    new_thread_monitor.reset(new NewThreadMonitor(event_selection_set_, system_wide_collection_,
+                                                  event_selection_set_.GetMonitoredProcesses(),
+                                                  thread_info_));
+  }
   if (report_per_thread_) {
     MonitorEachThread();
   }
@@ -628,6 +706,9 @@ bool StatCommand::Run(const std::vector<std::string>& args) {
     if (!loop->AddPeriodicEvent(SecondToTimeval(interval_in_ms_ / 1000.0), print_counters)) {
       return false;
     }
+  }
+  if (new_thread_monitor && !new_thread_monitor->Start()) {
+    return false;
   }
 
   // 5. Count events while workload running.
@@ -696,6 +777,7 @@ bool StatCommand::ParseOptions(const std::vector<std::string>& args,
       }
     }
   }
+  monitor_new_thread_ = options.PullBoolValue("--monitor-new-thread");
   child_inherit_ = !options.PullBoolValue("--no-inherit");
 
   if (auto value = options.PullValue("-o"); value) {
@@ -799,6 +881,12 @@ bool StatCommand::ParseOptions(const std::vector<std::string>& args,
   if (system_wide_collection_ && !IsRoot()) {
     LOG(ERROR) << "System wide profiling needs root privilege.";
     return false;
+  }
+  if (monitor_new_thread_) {
+    if (!report_per_thread_ || child_inherit_) {
+      LOG(ERROR) << "--monitor-new-thread should be used with --per-thread and --no-inherit";
+      return false;
+    }
   }
 
   if (report_per_core_ || report_per_thread_) {
