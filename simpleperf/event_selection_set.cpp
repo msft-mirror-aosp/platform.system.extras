@@ -724,6 +724,11 @@ static std::set<pid_t> PrepareThreads(const std::set<pid_t>& processes,
 }
 
 bool EventSelectionSet::OpenEventFiles() {
+  std::set<pid_t> threads = PrepareThreads(processes_, threads_);
+  return OpenEventFilesForThreads(threads);
+}
+
+bool EventSelectionSet::OpenEventFilesForThreads(const std::set<pid_t>& threads) {
   std::vector<int> online_cpus = GetOnlineCpus();
 
   auto check_if_cpus_online = [&](const std::vector<int>& cpus) {
@@ -739,7 +744,6 @@ bool EventSelectionSet::OpenEventFiles() {
     return true;
   };
 
-  std::set<pid_t> threads = PrepareThreads(processes_, threads_);
   for (auto& group : groups_) {
     const std::vector<int>* pcpus = &group.cpus;
     if (!group.selections[0].allowed_cpus.empty()) {
