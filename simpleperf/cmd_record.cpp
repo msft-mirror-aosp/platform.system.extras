@@ -1291,6 +1291,7 @@ bool RecordCommand::ParseOptions(const std::vector<std::string>& args,
           return false;
         }
         rate.sample_freq = value.uint_value;
+        max_sample_freq_ = std::max(max_sample_freq_, rate.sample_freq);
       }
       event_selection_set_.SetSampleRateForNewEvents(rate);
 
