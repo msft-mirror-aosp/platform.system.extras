@@ -538,7 +538,7 @@ class StatCommand : public Command {
   void PrintHardwareCounters();
   bool AddDefaultMeasuredEventTypes();
   void SetEventSelectionFlags();
-  void MonitorEachThread();
+  void MonitorEachThread(std::unique_ptr<Workload>& workload);
   void AdjustToIntervalOnlyValues(std::vector<CountersInfo>& counters);
   bool ShowCounters(const std::vector<CountersInfo>& counters, double duration_in_sec, FILE* fp);
   void CheckHardwareCounterMultiplexing();
@@ -642,7 +642,7 @@ bool StatCommand::Run(const std::vector<std::string>& args) {
                                                   thread_info_));
   }
   if (report_per_thread_) {
-    MonitorEachThread();
+    MonitorEachThread(workload);
   }
 
   // 3. Open perf_event_files and output file if defined.
@@ -998,12 +998,15 @@ void StatCommand::SetEventSelectionFlags() {
   event_selection_set_.SetInherit(child_inherit_);
 }
 
-void StatCommand::MonitorEachThread() {
+void StatCommand::MonitorEachThread(std::unique_ptr<Workload>& workload) {
   std::vector<pid_t> threads;
   for (auto pid : event_selection_set_.GetMonitoredProcesses()) {
     for (auto tid : GetThreadsInProcess(pid)) {
       ThreadInfo info;
       if (GetThreadName(tid, &info.name)) {
+        if (tid == pid && workload && workload->GetPid() == pid) {
+          info.name = workload->GetCommandName();
+        }
         info.tid = tid;
         info.pid = pid;
         thread_info_[tid] = std::move(info);
