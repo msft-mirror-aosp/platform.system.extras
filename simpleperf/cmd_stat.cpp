@@ -371,6 +371,8 @@ class NewThreadMonitor {
     if (!loop->AddPeriodicEvent(tv, std::bind(&NewThreadMonitor::Scan, this))) {
       return false;
     }
+    // Ensure perf event files opened for new threads are immediately enabled.
+    event_selection_set_.SetEnableCondition(true, false);
     return true;
   }
 
