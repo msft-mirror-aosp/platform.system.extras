@@ -87,6 +87,17 @@ Workload::~Workload() {
   }
 }
 
+std::string Workload::GetCommandName() {
+  if (child_proc_args_.empty()) {
+    return "";
+  }
+  std::string name = child_proc_args_[0];
+  if (auto split_pos = name.rfind('/'); split_pos != std::string::npos) {
+    name = name.substr(split_pos + 1);
+  }
+  return name;
+}
+
 bool Workload::CreateNewProcess() {
   CHECK_EQ(work_state_, NotYetCreateNewProcess);
 
