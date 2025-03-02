@@ -378,6 +378,14 @@ TEST(stat_cmd, per_thread_option) {
 }
 
 // @CddTest = 6.1/C-0-2
+TEST(stat_cmd, monitor_new_thread_option) {
+  ASSERT_TRUE(
+      StatCmd()->Run({"--per-thread", "--monitor-new-thread", "--no-inherit", "sleep", "0.1"}));
+  TEST_IN_ROOT(StatCmd()->Run(
+      {"--per-thread", "--monitor-new-thread", "--no-inherit", "-a", "--duration", "0.1"}));
+}
+
+// @CddTest = 6.1/C-0-2
 TEST(stat_cmd, per_core_option) {
   ASSERT_TRUE(StatCmd()->Run({"--per-core", "sleep", "0.1"}));
   TEST_IN_ROOT(StatCmd()->Run({"--per-core", "-a", "--duration", "0.1"}));

@@ -21,6 +21,7 @@ from .validation_error import ValidationError
 TRACED_ENABLE_PROP = "persist.traced.enable"
 TRACED_RELAY_PRODUCER_PORT_PROP = "traced.relay_producer_port"
 TRACED_RELAY_PORT_PROP = "traced_relay.relay_port"
+TRACED_HYPERVISOR_PROP = "ro.traced.hypervisor"
 
 def add_vm_parser(subparsers):
   vm_parser = subparsers.add_parser('vm',
@@ -99,6 +100,12 @@ class VmCommand(Command):
 
   def traced_relay_execute(self, device):
     if self.subcommand == 'enable':
+      if (len(device.get_prop(TRACED_HYPERVISOR_PROP)) == 0):
+        # Traced_relay can only be used in virtualized environments,
+        # therefore set the |TRACED_HYPERVISOR_PROP| to true if
+        # enabling traced_relay.
+        print(f"Setting sysprop \"{TRACED_HYPERVISOR_PROP}\" to \"true\"")
+        device.set_prop(TRACED_HYPERVISOR_PROP, "true")
       device.set_prop(TRACED_RELAY_PORT_PROP, self.relay_port)
       device.set_prop(TRACED_ENABLE_PROP, "2")
     else: # disable
