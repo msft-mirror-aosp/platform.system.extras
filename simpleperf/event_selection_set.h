@@ -165,6 +165,7 @@ class EventSelectionSet {
   IOEventLoop* GetIOEventLoop() { return loop_.get(); }
 
   bool OpenEventFiles();
+  bool OpenEventFilesForThreads(const std::set<pid_t>& threads);
   bool ReadCounters(std::vector<CountersInfo>* counters);
   bool MmapEventFiles(size_t min_mmap_pages, size_t max_mmap_pages, size_t aux_buffer_size,
                       size_t record_buffer_size, bool allow_truncating_samples, bool exclude_perf);
