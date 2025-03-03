@@ -72,13 +72,6 @@ python_binary_host {
         "mke2fs.conf",
     ],
 
-    version: {
-        py3: {
-            enabled: true,
-            embedded_launcher: true,
-        },
-    },
-
     required: [
         "mke2fs",
         "e2fsdroid",
