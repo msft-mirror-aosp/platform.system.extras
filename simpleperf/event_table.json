@@ -1080,7 +1080,19 @@
       ["0x01c5", "BR_MISP_RETIRED.COND_TAKEN", "Counts taken conditional mispredicted branch instructions retired", "atom=0xfec5"],
       ["0x80c5", "BR_MISP_RETIRED.INDIRECT", "Counts miss-predicted near indirect branch instructions retired excluding returns. TSX abort is an indirect branch.", "atom=0xebc5"],
       ["0x02c5", "BR_MISP_RETIRED.INDIRECT_CALL", "Counts retired mispredicted indirect (near taken) CALL instructions, including both register and memory indirect.", "atom=0xfbc5"],
-      ["0x08c5", "BR_MISP_RETIRED.RET", "Counts the number of mispredicted near RET branch instructions retired.", "atom=0xf7c5"]
+      ["0x08c5", "BR_MISP_RETIRED.RET", "Counts the number of mispredicted near RET branch instructions retired.", "atom=0xf7c5"],
+      ["0x0261", "DSB2MITE_SWITCHES.PENALTY_CYCLES", "event counts fetch penalty cycles when a transition occurs from DSB to MITE", "atom=0x0000"],
+      ["0x03C6", "FRONTEND_RETIRED.ANY_DSB_MISS", "Counts retired Instructions that experienced DSB (Decode stream buffer i.e. the decoded instruction-cache) miss.", "atom=0x0000"],
+      ["0x03C6" , "FRONTEND_RETIRED.DSB_MISS", "event count number of retired Instructions that experienced a critical DSB", "atom=0x0000"],
+      ["0x0879", "IDQ.DSB_CYCLES_ANY", "Counts the number of cycles uops delivered to Instruction Decode Queue (IDQ) from the Decode Stream Buffer (DSB) path", "atom=0x0000"],
+      ["0x0879", "IDQ.DSB_UOPS_OK", "Counts the number of cycles where optimal number of uops was delivered to the Instruction Decode Queue (IDQ) from the Decode Stream Buffer (DSB) path", "atom=0x0000"],
+      ["0x0879", "IDQ.DSB_UOPS", "Counts the number of uops delivered to Instruction Decode Queue (IDQ) from the Decode Stream Buffer (DSB) path", "atom=0x0000"],
+      ["0x0479", "IDQ.MITE_CYCLES_ANY", "Counts the number of cycles uops were delivered to the Instruction Decode Queue (IDQ) from the MITE", "atom=0x0000"],
+      ["0x0479", "IDQ.MITE_CYCLES_OK", "Counts the number of cycles where optimal number of uops was delivered to the Instruction Decode Queue (IDQ) from the MITE path", "atom=0x0000"],
+      ["0x0479", "IDQ.MITE_UOPS", "Counts the number of uops delivered to Instruction Decode Queue (IDQ) from the MITE path", "atom=0x0000"],
+      ["0x2079", "IDQ.MS_CYCLES_ANY", "Counts cycles during which uops are being delivered to Instruction Decode Queue (IDQ) while the Microcode Sequencer (MS) is busy", "atom=0x0000"],
+      ["0x2079", "IDQ.MS_SWITCHES", "Number of switches from DSB (Decode Stream Buffer) or MITE (legacy decode pipeline) to the Microcode Sequencer.", "atom=0x0000"],
+      ["0x2079", "IDQ.MS_UOPS", "Count the number of uops initiated by by MITE or DSB and delivered to Instruction Decode Queue (IDQ) while the Micrococde sequencer (MS) is busy", "atom=0x0000"]
     ]
   },
   "x86-amd": {
