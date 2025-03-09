@@ -22,10 +22,7 @@ package {
 python_binary_host {
     name: "progress_report",
     srcs: ["progress_report.py"],
-    libs: [ "report_proto",],
-    version: {
-    	     py3: { embedded_launcher: true },
-    },
+    libs: ["report_proto"],
     main: "progress_report.py",
 }
 
