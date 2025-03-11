@@ -108,6 +108,7 @@ class ElfFile {
 };
 
 bool IsArmMappingSymbol(const char* name);
+bool IsRISCVMappingSymbol(const char* name);
 ElfStatus IsValidElfFile(int fd, uint64_t file_offset = 0);
 bool IsValidElfFileMagic(const char* buf, size_t buf_size);
 bool GetBuildIdFromNoteSection(const char* section, size_t section_size, BuildId* build_id);
