@@ -628,6 +628,15 @@ def main() -> None:
             while not callback.abort and lib.GetNextSample():
                 pass
 
+            # Trace has ended, make sure every call has a corresponding return. Use the largest
+            # timestamp and end everything there.
+            last_timestamps = [stacker.last_timestamp for stacker
+                               in callback.stacks.values()
+                               if stacker.last_timestamp]
+            last_timestamp = max(last_timestamps, default=None)
+            for stacker in callback.stacks.values():
+                stacker.last_timestamp = last_timestamp
+            callback.gap()
             callback.flush()
 
     finally:

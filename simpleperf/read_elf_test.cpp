@@ -179,6 +179,17 @@ TEST(read_elf, arm_mapping_symbol) {
 }
 
 // @CddTest = 6.1/C-0-2
+TEST(read_elf, riscv_mapping_symbol) {
+  ASSERT_TRUE(IsRISCVMappingSymbol("$d"));
+  ASSERT_TRUE(IsRISCVMappingSymbol("$x"));
+  ASSERT_TRUE(IsRISCVMappingSymbol("$xrv64imafd"));
+  ASSERT_FALSE(IsRISCVMappingSymbol("$b"));
+  ASSERT_TRUE(IsRISCVMappingSymbol("$d.anything"));
+  ASSERT_TRUE(IsRISCVMappingSymbol("$x.anything"));
+  ASSERT_TRUE(IsRISCVMappingSymbol("$xrv64imafd.anything"));
+}
+
+// @CddTest = 6.1/C-0-2
 TEST(read_elf, ElfFile_Open) {
   auto IsValidElfPath = [](const std::string& path) {
     ElfStatus status;

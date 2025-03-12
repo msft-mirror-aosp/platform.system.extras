@@ -130,11 +130,23 @@ ElfStatus GetBuildIdFromNoteFile(const std::string& filename, BuildId* build_id)
 }
 
 bool IsArmMappingSymbol(const char* name) {
-  // Mapping symbols in arm, which are described in "ELF for ARM Architecture" and
-  // "ELF for ARM 64-bit Architecture". The regular expression to match mapping symbol
-  // is ^\$(a|d|t|x)(\..*)?$
+  // Matches ARM ELF mapping symbols (e.g., $a, $d, $t, $x, $x.foo).
+  // See:
+  //   - ARM64 (ELF for the ARM 64-bit Architecture):
+  //   https://github.com/ARM-software/abi-aa/blob/main/aaelf64/aaelf64.rst#mapping-symbols
+  //   - ARM (ELF for the ARM Architecture):
+  //   https://github.com/ARM-software/abi-aa/blob/main/aaelf32/aaelf32.rst#mapping-symbols
+  // Regex: ^\$(a|d|t|x)(\..*)?$
   return name[0] == '$' && strchr("adtx", name[1]) != nullptr &&
          (name[2] == '\0' || name[2] == '.');
+}
+
+bool IsRISCVMappingSymbol(const char* name) {
+  // Mapping symbols in RISC-V, which are described in "RISC-V ABIs Specification", in
+  // https://github.com/riscv-non-isa/riscv-elf-psabi-doc/blob/master/riscv-elf.adoc#mapping-symbol.
+  // It could be $d, $d.<any>, $x, $x.<any>, $x<isa> or $x<isa>.<any>.
+  // We just loosely check the first character is '$' and the second character is 'd' or 'x'.
+  return name[0] == '$' && strchr("dx", name[1]) != nullptr;
 }
 
 namespace {
@@ -230,8 +242,10 @@ static inline llvm::Expected<llvm::StringRef> GetELFSectionName(
 }
 
 void ReadSymbolTable(llvm::object::symbol_iterator sym_begin, llvm::object::symbol_iterator sym_end,
-                     const std::function<void(const ElfFileSymbol&)>& callback, bool is_arm,
+                     const std::function<void(const ElfFileSymbol&)>& callback, int machine,
                      const llvm::object::section_iterator& section_end) {
+  bool is_arm = (machine == llvm::ELF::EM_ARM || machine == llvm::ELF::EM_AARCH64);
+  bool is_riscv = machine == llvm::ELF::EM_RISCV;
   for (; sym_begin != sym_end; ++sym_begin) {
     ElfFileSymbol symbol;
     auto symbol_ref = static_cast<const llvm::object::ELFSymbolRef*>(&*sym_begin);
@@ -277,14 +291,12 @@ void ReadSymbolTable(llvm::object::symbol_iterator sym_begin, llvm::object::symb
     } else if (symbol_type == llvm::object::SymbolRef::ST_Unknown) {
       if (symbol.is_in_text_section) {
         symbol.is_label = true;
-        if (is_arm) {
-          // Remove mapping symbols in arm.
-          const char* p = (symbol.name.compare(0, linker_prefix.size(), linker_prefix) == 0)
-                              ? symbol.name.c_str() + linker_prefix.size()
-                              : symbol.name.c_str();
-          if (IsArmMappingSymbol(p)) {
-            symbol.is_label = false;
-          }
+        const char* p = (symbol.name.compare(0, linker_prefix.size(), linker_prefix) == 0)
+                            ? symbol.name.c_str() + linker_prefix.size()
+                            : symbol.name.c_str();
+        // Remove mapping symbols in arm and RISC-V.
+        if ((is_arm && IsArmMappingSymbol(p)) || (is_riscv && IsRISCVMappingSymbol(p))) {
+          symbol.is_label = false;
         }
       }
     }
@@ -417,28 +429,29 @@ class ElfFileImpl<llvm::object::ELFObjectFile<ELFT>> : public ElfFile {
   }
 
   ElfStatus ParseSymbols(const ParseSymbolCallback& callback) override {
-    auto machine = GetELFHeader(elf_).e_machine;
-    bool is_arm = (machine == llvm::ELF::EM_ARM || machine == llvm::ELF::EM_AARCH64);
     AddSymbolForPltSection(elf_obj_, callback);
     // Some applications deliberately ship elf files with broken section tables.
     // So check the existence of .symtab section and .dynsym section before reading symbols.
     bool has_symtab;
     bool has_dynsym;
     CheckSymbolSections(elf_obj_, &has_symtab, &has_dynsym);
+    int machine = GetELFHeader(elf_).e_machine;
     if (has_symtab && elf_obj_->symbol_begin() != elf_obj_->symbol_end()) {
-      ReadSymbolTable(elf_obj_->symbol_begin(), elf_obj_->symbol_end(), callback, is_arm,
+      ReadSymbolTable(elf_obj_->symbol_begin(), elf_obj_->symbol_end(), callback, machine,
                       elf_obj_->section_end());
       return ElfStatus::NO_ERROR;
-    } else if (has_dynsym && elf_obj_->dynamic_symbol_begin()->getRawDataRefImpl() !=
-                                 llvm::object::DataRefImpl()) {
+    }
+    if (has_dynsym &&
+        elf_obj_->dynamic_symbol_begin()->getRawDataRefImpl() != llvm::object::DataRefImpl()) {
       ReadSymbolTable(elf_obj_->dynamic_symbol_begin(), elf_obj_->dynamic_symbol_end(), callback,
-                      is_arm, elf_obj_->section_end());
+                      machine, elf_obj_->section_end());
     }
     std::string debugdata;
     ElfStatus result = ReadSection(".gnu_debugdata", &debugdata);
     if (result == ElfStatus::SECTION_NOT_FOUND) {
       return ElfStatus::NO_SYMBOL_TABLE;
-    } else if (result == ElfStatus::NO_ERROR) {
+    }
+    if (result == ElfStatus::NO_ERROR) {
       std::string decompressed_data;
       if (XzDecompress(debugdata, &decompressed_data)) {
         auto debugdata_elf =
@@ -452,10 +465,8 @@ class ElfFileImpl<llvm::object::ELFObjectFile<ELFT>> : public ElfFile {
   }
 
   void ParseDynamicSymbols(const ParseSymbolCallback& callback) override {
-    auto machine = GetELFHeader(elf_).e_machine;
-    bool is_arm = (machine == llvm::ELF::EM_ARM || machine == llvm::ELF::EM_AARCH64);
     ReadSymbolTable(elf_obj_->dynamic_symbol_begin(), elf_obj_->dynamic_symbol_end(), callback,
-                    is_arm, elf_obj_->section_end());
+                    GetELFHeader(elf_).e_machine, elf_obj_->section_end());
   }
 
   ElfStatus ReadSection(const std::string& section_name, std::string* content) override {
