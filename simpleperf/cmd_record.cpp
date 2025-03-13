@@ -2163,6 +2163,9 @@ bool RecordCommand::DumpBuildIdFeature() {
   BuildId build_id;
   std::vector<Dso*> dso_v = thread_tree_.GetAllDsos();
   for (Dso* dso : dso_v) {
+    if (dso->type() == DSO_UNKNOWN_FILE) {
+      continue;
+    }
     // For aux tracing, we don't know which binaries are traced.
     // So dump build ids for all binaries.
     if (!dso->HasDumpId() && !event_selection_set_.HasAuxTrace()) {
@@ -2171,6 +2174,23 @@ bool RecordCommand::DumpBuildIdFeature() {
     if (GetBuildId(*dso, build_id)) {
       bool in_kernel = dso->type() == DSO_KERNEL || dso->type() == DSO_KERNEL_MODULE;
       build_id_records.emplace_back(in_kernel, UINT_MAX, build_id, dso->Path());
+    }
+  }
+  if (event_selection_set_.HasAuxTrace()) {
+    // If [vdso]->GetDebugFilePath() exists, copy it to "./vdso.so". If it does exist, the build id
+    // of [vdso] was read out from it, and [vdso] itself was already added to the vector in the loop
+    // above.
+    constexpr uint64_t force_64bit = (sizeof(size_t) == sizeof(uint64_t)) ? 1ULL << 32 : 1;
+    Dso* vdso = thread_tree_.FindUserDsoOrNew("[vdso]", force_64bit);
+    if (std::filesystem::exists(vdso->GetDebugFilePath())) {
+      std::string saved_vdso =
+          std::filesystem::absolute(android::base::Dirname(record_filename_) + "/vdso.so");
+      std::filesystem::copy_file(vdso->GetDebugFilePath(), saved_vdso,
+                                 std::filesystem::copy_options::overwrite_existing);
+      Dso* saved_vdso_dso = thread_tree_.FindUserDsoOrNew(saved_vdso, force_64bit);
+      if (GetBuildId(*saved_vdso_dso, build_id)) {
+        build_id_records.emplace_back(false, UINT_MAX, build_id, saved_vdso);
+      }
     }
   }
   if (!record_file_writer_->WriteBuildIdFeature(build_id_records)) {

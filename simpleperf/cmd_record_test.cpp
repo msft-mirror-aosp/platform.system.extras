@@ -1267,6 +1267,29 @@ TEST(record_cmd, etm_flush_interval_option) {
   ASSERT_TRUE(RunRecordCmd({"-e", "cs-etm", "--etm-flush-interval", "10"}));
 }
 
+TEST(record_cmd, etm_uses_vdso) {
+  if (!ETMRecorder::GetInstance().CheckEtmSupport().ok()) {
+    GTEST_LOG_(INFO) << "Omit this test since etm isn't supported on this device";
+    return;
+  }
+  TemporaryFile record_file;
+  ASSERT_TRUE(RunRecordCmd({"-e", "cs-etm"}, record_file.path));
+  TemporaryFile inject_file;
+  ASSERT_TRUE(CreateCommandInstance("inject")->Run(
+      {"-i", record_file.path, "-o", inject_file.path, "--binary", "\\[vdso\\]"}));
+
+  std::string data;
+  ASSERT_TRUE(android::base::ReadFileToString(inject_file.path, &data));
+  bool seen_vdso = false;
+  for (auto& line : android::base::Split(data, "\n")) {
+    if ("// [vdso]" == line) {
+      seen_vdso = true;
+      break;
+    }
+  }
+  ASSERT_TRUE(seen_vdso);
+}
+
 // @CddTest = 6.1/C-0-2
 TEST(record_cmd, pmu_event_option) {
   TEST_REQUIRE_PMU_COUNTER();
