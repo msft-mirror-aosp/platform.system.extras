@@ -115,6 +115,13 @@ cc_binary {
     ],
 }
 
+// Used as an example in collect_lbr_data_for_autofdo.md.
+cc_binary {
+    name: "autofdo_inline_test",
+    srcs: ["autofdo_inline_test.cpp"],
+    afdo: true,
+}
+
 cc_binary {
     name: "autofdo_addr_test",
     srcs: ["autofdo_addr_test.cpp"],
