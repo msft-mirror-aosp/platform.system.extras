@@ -1177,12 +1177,18 @@ TEST(record_cmd, addr_filter_option) {
   std::string data;
   ASSERT_TRUE(android::base::ReadFileToString(inject_file.path, &data));
   // Only instructions in sleep_exec_path are traced.
+  bool seen_sleep = false;
   for (auto& line : android::base::Split(data, "\n")) {
-    if (android::base::StartsWith(line, "dso ")) {
-      std::string dso = line.substr(strlen("dso "), sleep_exec_path.size());
+    if (android::base::StartsWith(line, "// ")) {
+      if (android::base::StartsWith(line, "// build_id: ")) {
+        continue;
+      }
+      std::string dso = line.substr(strlen("// "), sleep_exec_path.size());
       ASSERT_EQ(dso, sleep_exec_path);
+      seen_sleep = true;
     }
   }
+  ASSERT_TRUE(seen_sleep);
 
   // Test if different filter types are accepted by the kernel.
   auto elf = ElfFile::Open(sleep_exec_path);
