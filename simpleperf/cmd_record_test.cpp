@@ -1177,12 +1177,18 @@ TEST(record_cmd, addr_filter_option) {
   std::string data;
   ASSERT_TRUE(android::base::ReadFileToString(inject_file.path, &data));
   // Only instructions in sleep_exec_path are traced.
+  bool seen_sleep = false;
   for (auto& line : android::base::Split(data, "\n")) {
-    if (android::base::StartsWith(line, "dso ")) {
-      std::string dso = line.substr(strlen("dso "), sleep_exec_path.size());
+    if (android::base::StartsWith(line, "// ")) {
+      if (android::base::StartsWith(line, "// build_id: ")) {
+        continue;
+      }
+      std::string dso = line.substr(strlen("// "), sleep_exec_path.size());
       ASSERT_EQ(dso, sleep_exec_path);
+      seen_sleep = true;
     }
   }
+  ASSERT_TRUE(seen_sleep);
 
   // Test if different filter types are accepted by the kernel.
   auto elf = ElfFile::Open(sleep_exec_path);
@@ -1265,6 +1271,29 @@ TEST(record_cmd, etm_flush_interval_option) {
     return;
   }
   ASSERT_TRUE(RunRecordCmd({"-e", "cs-etm", "--etm-flush-interval", "10"}));
+}
+
+TEST(record_cmd, etm_uses_vdso) {
+  if (!ETMRecorder::GetInstance().CheckEtmSupport().ok()) {
+    GTEST_LOG_(INFO) << "Omit this test since etm isn't supported on this device";
+    return;
+  }
+  TemporaryFile record_file;
+  ASSERT_TRUE(RunRecordCmd({"-e", "cs-etm"}, record_file.path));
+  TemporaryFile inject_file;
+  ASSERT_TRUE(CreateCommandInstance("inject")->Run(
+      {"-i", record_file.path, "-o", inject_file.path, "--binary", "\\[vdso\\]"}));
+
+  std::string data;
+  ASSERT_TRUE(android::base::ReadFileToString(inject_file.path, &data));
+  bool seen_vdso = false;
+  for (auto& line : android::base::Split(data, "\n")) {
+    if ("// [vdso]" == line) {
+      seen_vdso = true;
+      break;
+    }
+  }
+  ASSERT_TRUE(seen_vdso);
 }
 
 // @CddTest = 6.1/C-0-2
