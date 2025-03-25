@@ -1114,6 +1114,11 @@ bool GetBuildId(const Dso& dso, BuildId& build_id) {
     if (GetBuildIdFromDsoPath(dso.Path(), &build_id)) {
       return true;
     }
+    if (dso.Path() == "[vdso]") {
+      if (GetBuildIdFromDsoPath(dso.GetDebugFilePath(), &build_id)) {
+        return true;
+      }
+    }
   }
   return false;
 }
